@@ -1,7 +1,8 @@
 # Syrilium.Caching
 Seamless caching and easy implementation of any virtual method in any class.
 
-NuGet (download/install) [Syrilium.Caching](https://www.nuget.org/packages/Syrilium.Caching)
+NuGet (download/install) [Syrilium.Caching](https://www.nuget.org/packages/Syrilium.Caching) 
+
 Comments on [CodeProject](http://www.codeproject.com/Tips/877717/Syrilium-Caching)
 
 ##Introduction
