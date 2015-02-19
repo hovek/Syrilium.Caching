@@ -1,38 +1,32 @@
 # Syrilium.Caching
 Seamless caching and easy implementation of any virtual method in any class.
 
-NuGet (download/install) Syrilium.Caching
+NuGet (download/install) [Syrilium.Caching](https://www.nuget.org/packages/Syrilium.Caching)
 
-Introduction
+##Introduction
 Caching based on virtual methods, offers caching for methods without need to code and prepare them for caching.
 
-Background
+##Background
 Idea behind this is to enable caching for any class in project and even dll references if methods are virtual with minimal preconfiguration (keeping classes clean, not worrying too much about caching).
 
 You can have multiple instances of cache, every instance has it's own cached values and configuration and they are sharing information about types for performance and memory, it's also thread safe.
 
-How it works?
-You start by requesting the instance of an object for which you want caching enabled for a required type.
-
-var test = MainCache.I<Test>();
+##How it works?
+You start by requesting the instance of an object for which you want caching enabled for a required type. 
+`var test = MainCache.I<Test>();`
 Cache creates a derived type (only first time, every other time returns just new instance) that inherits Test class and overloads all virtual methods that are not excluded by configuration. This is accomplished by MSIL, similar how entity framework inherits entities for property lazy loading and more.
 
-Then when you call 
+Then when you call `var i = test.Mtd(1);` your method is not called directly but the one that overrides it on derived class and from that overriden method method on Cache object is called that creates a cache key based on method "id" and hash created from parameter values, then it decides should original method be called or cached value is returned if it exists for generated key.
 
-var i = test.Mtd(1);
-your method is not called directly but the one that overrides it on derived class and from that overriden method method on Cache object is called that creates a cache key based on method "id" and hash created from parameter values, then it decides should original method be called or cached value is returned if it exists for generated key.
-
-Inside the Cache class
-After first call of
-
-MainCache.I<Test>();
- method, it gets to
-
-        public dynamic I(Type type)
-        {
-            DerivedTypeCache derivedTypeCache = getDerivedType(type);
-            return derivedTypeCache.GetInstance(this);
-        }
+####Inside the Cache class
+After first call of `MainCache.I<Test>();` method, it gets to
+```cs
+public dynamic I(Type type)
+{
+    DerivedTypeCache derivedTypeCache = getDerivedType(type);
+    return derivedTypeCache.GetInstance(this);
+}
+```
 where it first gets or creates derived type, after that it gets instance of that derived type and sets the instance of cache on it for later usage.
 
 Derived types are shared among all cache instances, also values that have set expiration are shared among instances.
@@ -44,8 +38,8 @@ int key in Dictionary represents a second in time diminished by initial second t
 
 With that, there is single timer for all cache instances that fires every second and checks dictionary for expired values, single timer for application. It stores what second was last checked and starts checking from it to current one.
 
-Usage example
-
+##Usage example
+```cs
 using Syrilium.Caching;
 using System;
 using System.Threading;
@@ -150,3 +144,4 @@ namespace WpfApplication1
 		}
 	}
 }
+```
