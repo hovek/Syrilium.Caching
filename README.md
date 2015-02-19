@@ -13,7 +13,9 @@ You can have multiple instances of cache, every instance has it's own cached val
 
 ##How it works?
 You start by requesting the instance of an object for which you want caching enabled for a required type. 
-`var test = MainCache.I<Test>();`
+```cs
+var test = MainCache.I<Test>();
+```
 Cache creates a derived type (only first time, every other time returns just new instance) that inherits Test class and overloads all virtual methods that are not excluded by configuration. This is accomplished by MSIL, similar how entity framework inherits entities for property lazy loading and more.
 
 Then when you call `var i = test.Mtd(1);` your method is not called directly but the one that overrides it on derived class and from that overriden method method on Cache object is called that creates a cache key based on method "id" and hash created from parameter values, then it decides should original method be called or cached value is returned if it exists for generated key.
@@ -32,8 +34,7 @@ where it first gets or creates derived type, after that it gets instance of that
 Derived types are shared among all cache instances, also values that have set expiration are shared among instances.
 
 Values that have set expiration are stored in
-
-private static ReaderWriterLockWrapper<Dictionary<int, Dictionary<Cache, List<CacheInfo>>>> valuesExpiration;
+`private static ReaderWriterLockWrapper<Dictionary<int, Dictionary<Cache, List<CacheInfo>>>> valuesExpiration;`
 int key in Dictionary represents a second in time diminished by initial second that is set on static constructor of Cache and values are stored under second that they expire on. That's why seconds doesn't need to be type long.
 
 With that, there is single timer for all cache instances that fires every second and checks dictionary for expired values, single timer for application. It stores what second was last checked and starts checking from it to current one.
