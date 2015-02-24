@@ -236,6 +236,8 @@ namespace Syrilium.Caching
 		internal TimeSpan? ClearAfterProp { get; set; }
 		internal bool IdleReadClearTimeSet { get; set; }
 		internal TimeSpan? IdleReadClearTimeProp { get; set; }
+		internal bool ParamsForKeyPropSet { get; set; }
+		internal int[] ParamsForKeyProp { get; set; }
 	}
 
 	public class CacheMethodConfiguration<T> : CacheMethodConfiguration, ICacheMethodConfiguration<T>
@@ -277,7 +279,7 @@ namespace Syrilium.Caching
 				throw new InvalidOperationException("Method \"" + name + "\" does not exist on \"" + type.Name + "\" type.");
 
 			if (!Cache.IsMethodValid(methodOnType, true))
-				throw new InvalidOperationException("Method \"" + methodOnType.Name + "\" has to be virtual and have return type or ref parameters.");
+				throw new InvalidOperationException("Method \"" + methodOnType.Name + "\" has to be virtual non internal and have return type or ref parameter/s.");
 
 			MethodInfo = methodOnType;
 
@@ -330,6 +332,13 @@ namespace Syrilium.Caching
 		{
 			IdleReadClearTimeSet = true;
 			IdleReadClearTimeProp = time;
+			return this;
+		}
+
+		public ICacheMethodConfiguration<T> ParamsForKey(params int[] paramIndexes)
+		{
+			ParamsForKeyPropSet = true;
+			ParamsForKeyProp = paramIndexes;
 			return this;
 		}
 	}

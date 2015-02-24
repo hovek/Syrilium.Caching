@@ -19,5 +19,6 @@ namespace Syrilium.CommonInterface
         object CreateNewInstance(Type type, params object[] parametersForConstructor);
         object CreateNewInstance(Type type, Type[] parametersTypes, object[] parametersForConstructor, BindingFlags bindingAttr = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         MethodInfo GetMethodOnType(Type type, string methodName, Type[] types = null, BindingFlags bindingAttr = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, bool getBaseMethod = false);
+		MethodInfo FindGenericMethod(Type type, string methodName, Type[] types = null, BindingFlags bindingAttr = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
     }
 }
