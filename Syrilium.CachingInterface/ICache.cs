@@ -18,9 +18,9 @@ namespace Syrilium.CachingInterface
 	{
 		ReaderWriterLockWrapper<ObservableCollection<ICacheTypeConfiguration>> Configurations { get; }
 		ICacheConfiguration Configure { get; }
-		T I<T>();
-		T I<T>(Type type);
-		dynamic I(Type type);
+		T I<T>(params object[] parameters);
+		T I<T>(Type type, params object[] parameters);
+		dynamic I(Type type, params object[] parameters);
 		ICache AppendClearBuffer(object result);
 		ICache AppendClearBuffer<T>(bool exactType = false);
 		ICache AppendClearBuffer(Type cachedType, bool exactType = false);
@@ -64,6 +64,7 @@ namespace Syrilium.CachingInterface
 		ICacheTypeConfiguration<T> ClearAt(TimeSpan? time);
 		ICacheTypeConfiguration<T> ClearAfter(TimeSpan? time);
 		ICacheTypeConfiguration<T> IdleReadClearTime(TimeSpan? time);
+		ICacheTypeConfiguration<T> ConstructorParams(Type[] types);
 	}
 
 	public interface ICacheMethodConfiguration<T>

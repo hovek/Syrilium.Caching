@@ -220,20 +220,27 @@ namespace Syrilium.Caching
 			return typeBuilder;
 		}
 
-		private static void createConstructor(TypeBuilder typeBuilder, Type baseType)
+		private static void createConstructor(TypeBuilder typeBuilder, Type baseType, Type[] constructorTypes = null)
 		{
+			if (constructorTypes == null) constructorTypes = new Type[0];
 			ConstructorBuilder constructor = typeBuilder.DefineConstructor(
 								MethodAttributes.Public |
 								MethodAttributes.SpecialName |
 								MethodAttributes.RTSpecialName,
 								CallingConventions.Standard,
-								new Type[0]);
+								constructorTypes);
 			//Define the reflection ConstructorInfor for System.Object
-			ConstructorInfo conObj = baseType.GetConstructor(new Type[0]);
+			ConstructorInfo conObj = baseType.GetConstructor(constructorTypes);
 
 			//call constructor of base object
 			ILGenerator il = constructor.GetILGenerator();
 			il.Emit(OpCodes.Ldarg_0);
+			int i = 1;
+			foreach (var param in constructorTypes)
+			{
+				il.Emit(OpCodes.Ldarg, i);
+				i++;
+			}
 			il.Emit(OpCodes.Call, conObj);
 			il.Emit(OpCodes.Ret);
 		}
@@ -368,7 +375,7 @@ namespace Syrilium.Caching
 					il.Emit(OpCodes.Ceq);
 					Label labelParamNotValueType = il.DefineLabel();
 					il.Emit(OpCodes.Brtrue, labelParamNotValueType);//)
-					//{
+																	//{
 					il.Emit(OpCodes.Box, paramType);
 					//}
 					//else
@@ -429,7 +436,7 @@ namespace Syrilium.Caching
 					il.Emit(OpCodes.Ceq);
 					Label labelRetParamNotValueType = il.DefineLabel();
 					il.Emit(OpCodes.Brtrue, labelRetParamNotValueType);//)
-					//{
+																	   //{
 					il.Emit(OpCodes.Unbox_Any, methodOriginal.ReturnType);
 					//}
 					//else
@@ -460,7 +467,7 @@ namespace Syrilium.Caching
 					il.Emit(OpCodes.Ceq);
 					Label labelRefParamNotValueType = il.DefineLabel();
 					il.Emit(OpCodes.Brtrue, labelRefParamNotValueType);//)
-					//{
+																	   //{
 					il.Emit(OpCodes.Unbox_Any, param.Value);
 					//}
 					//else
@@ -522,7 +529,17 @@ namespace Syrilium.Caching
 			if (methodsForCaching.Count() > 0)
 			{
 				TypeBuilder typeBuilder = createType(modBuilder, string.Concat(baseType.Name, "_CACHED_", Guid.NewGuid().ToString().Replace("-", "")), baseType);
-				createConstructor(typeBuilder, baseType);
+
+				var config = Configurations.Read(cr =>
+				{
+					foreach (CacheTypeConfiguration ctc in cr.Value)
+					{
+						if (ctc.Type == baseType)
+							return ctc;
+					}
+					return null;
+				});
+				createConstructor(typeBuilder, baseType, config?.ConstructorParamTypes);
 
 				var callBaseMethodsRaw = new List<Tuple<string, MethodInfo, string, Type[], int[]>>();
 
@@ -540,7 +557,7 @@ namespace Syrilium.Caching
 				}
 
 				var derivedType = typeBuilder.CreateType();
-				dtc = new DerivedTypeCache(derivedType, baseType);
+				dtc = new DerivedTypeCache(derivedType, baseType, config?.ConstructorParamTypes);
 				foreach (var cbm in callBaseMethodsRaw)
 					derivedMethodCaches.Add(Tuple.Create(cbm.Item1, new DerivedMethodCache
 					{
@@ -712,7 +729,7 @@ namespace Syrilium.Caching
 		internal static bool IsMethodValid(MethodInfo mi, bool ignoreAbstract = false)
 		{
 			return mi.IsVirtual && !mi.IsAssembly && (ignoreAbstract || !mi.IsAbstract) && !mi.IsFinal && !mi.IsSpecialName
-				&& (mi.ReturnType != typeOfVoid || mi.GetParameters().Any(p => p.ParameterType.IsByRef));
+				/*&& (mi.ReturnType != typeOfVoid || mi.GetParameters().Any(p => p.ParameterType.IsByRef))*/;
 		}
 
 		internal static IEnumerable<MethodInfo> GetCompatibleMethods(Type type, bool ignoreAbstract = false)
@@ -941,20 +958,20 @@ namespace Syrilium.Caching
 			return expiresAt;
 		}
 
-		public T I<T>()
+		public T I<T>(params object[] parameters)
 		{
-			return I(typeof(T));
+			return I(typeof(T), parameters);
 		}
 
-		public T I<T>(Type type)
+		public T I<T>(Type type, params object[] parameters)
 		{
-			return I(type);
+			return I(type, parameters);
 		}
 
-		public dynamic I(Type type)
+		public dynamic I(Type type, params object[] parameters)
 		{
 			DerivedTypeCache derivedTypeCache = getDerivedType(type);
-			return derivedTypeCache.GetInstance(this);
+			return derivedTypeCache.GetInstance(this, parameters);
 		}
 
 		public ICache AppendClearBuffer(object result)
@@ -1116,17 +1133,17 @@ namespace Syrilium.Caching
 		{
 		}
 
-		public DerivedTypeCache(Type type, Type baseType)
+		public DerivedTypeCache(Type type, Type baseType, Type[] constructorTypes = null)
 			: this()
 		{
 			DerivedType = type;
 			BaseType = baseType;
-			DerivedTypeConstructorInfo = type.GetConstructor(Type.EmptyTypes);
+			DerivedTypeConstructorInfo = type.GetConstructor(constructorTypes ?? Type.EmptyTypes);
 		}
 
-		public dynamic GetInstance(Cache cache)
+		public dynamic GetInstance(Cache cache, params object[] parameters)
 		{
-			dynamic instance = DerivedTypeConstructorInfo.Invoke(Type.EmptyTypes);
+			dynamic instance = DerivedTypeConstructorInfo.Invoke(parameters);
 			if (instance is ICacheType)
 				instance.__Cache__ = cache;
 			return instance;

@@ -50,6 +50,9 @@ namespace Syrilium.Caching
 		internal bool IdleReadClearTimeSet { get; set; }
 		internal TimeSpan? IdleReadClearTimeProp { get; set; }
 
+		internal Type[] ConstructorParamTypes { get; set; }
+
+
 		internal virtual List<CacheMethodConfiguration> Methods
 		{
 			get
@@ -222,6 +225,12 @@ namespace Syrilium.Caching
 		public ICacheTypeConfiguration<T> Include()
 		{
 			All = true;
+			return this;
+		}
+
+		public ICacheTypeConfiguration<T> ConstructorParams(Type[] types)
+		{
+			base.ConstructorParamTypes = types;
 			return this;
 		}
 	}
