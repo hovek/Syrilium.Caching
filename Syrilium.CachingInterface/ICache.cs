@@ -64,7 +64,6 @@ namespace Syrilium.CachingInterface
 		ICacheTypeConfiguration<T> ClearAt(TimeSpan? time);
 		ICacheTypeConfiguration<T> ClearAfter(TimeSpan? time);
 		ICacheTypeConfiguration<T> IdleReadClearTime(TimeSpan? time);
-		ICacheTypeConfiguration<T> ConstructorParams(Type[] types);
 	}
 
 	public interface ICacheMethodConfiguration<T>

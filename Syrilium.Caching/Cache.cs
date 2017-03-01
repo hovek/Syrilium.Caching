@@ -220,28 +220,28 @@ namespace Syrilium.Caching
 			return typeBuilder;
 		}
 
-		private static void createConstructor(TypeBuilder typeBuilder, Type baseType, Type[] constructorTypes = null)
+		private static void createConstructors(TypeBuilder typeBuilder, Type baseType)
 		{
-			if (constructorTypes == null) constructorTypes = new Type[0];
+			foreach (var con in baseType.GetConstructors())
+				createConstructor(typeBuilder, con);
+		}
+
+		private static void createConstructor(TypeBuilder typeBuilder, ConstructorInfo baseConstructor)
+		{
+			var constructorTypes = baseConstructor.GetParameters().Select(p => p.ParameterType).ToArray();
 			ConstructorBuilder constructor = typeBuilder.DefineConstructor(
 								MethodAttributes.Public |
 								MethodAttributes.SpecialName |
 								MethodAttributes.RTSpecialName,
 								CallingConventions.Standard,
 								constructorTypes);
-			//Define the reflection ConstructorInfor for System.Object
-			ConstructorInfo conObj = baseType.GetConstructor(constructorTypes);
 
 			//call constructor of base object
 			ILGenerator il = constructor.GetILGenerator();
 			il.Emit(OpCodes.Ldarg_0);
-			int i = 1;
-			foreach (var param in constructorTypes)
-			{
+			for (int i = 1; i <= constructorTypes.Length; i++)
 				il.Emit(OpCodes.Ldarg, i);
-				i++;
-			}
-			il.Emit(OpCodes.Call, conObj);
+			il.Emit(OpCodes.Call, baseConstructor);
 			il.Emit(OpCodes.Ret);
 		}
 
@@ -530,16 +530,7 @@ namespace Syrilium.Caching
 			{
 				TypeBuilder typeBuilder = createType(modBuilder, string.Concat(baseType.Name, "_CACHED_", Guid.NewGuid().ToString().Replace("-", "")), baseType);
 
-				var config = Configurations.Read(cr =>
-				{
-					foreach (CacheTypeConfiguration ctc in cr.Value)
-					{
-						if (ctc.Type == baseType)
-							return ctc;
-					}
-					return null;
-				});
-				createConstructor(typeBuilder, baseType, config?.ConstructorParamTypes);
+				createConstructors(typeBuilder, baseType);
 
 				var callBaseMethodsRaw = new List<Tuple<string, MethodInfo, string, Type[], int[]>>();
 
@@ -557,7 +548,7 @@ namespace Syrilium.Caching
 				}
 
 				var derivedType = typeBuilder.CreateType();
-				dtc = new DerivedTypeCache(derivedType, baseType, config?.ConstructorParamTypes);
+				dtc = new DerivedTypeCache(derivedType, baseType);
 				foreach (var cbm in callBaseMethodsRaw)
 					derivedMethodCaches.Add(Tuple.Create(cbm.Item1, new DerivedMethodCache
 					{
@@ -1127,26 +1118,58 @@ namespace Syrilium.Caching
 	{
 		public Type DerivedType { get; set; }
 		public Type BaseType { get; set; }
-		public ConstructorInfo DerivedTypeConstructorInfo { get; set; }
+		public Dictionary<ConstructorInfo, ParameterInfo[]> DerivedTypeConstructorsInfoParams { get; set; }
 
-		private DerivedTypeCache()
+		public DerivedTypeCache()
 		{
+
 		}
 
-		public DerivedTypeCache(Type type, Type baseType, Type[] constructorTypes = null)
+		public DerivedTypeCache(Type type, Type baseType)
 			: this()
 		{
 			DerivedType = type;
 			BaseType = baseType;
-			DerivedTypeConstructorInfo = type.GetConstructor(constructorTypes ?? Type.EmptyTypes);
+			DerivedTypeConstructorsInfoParams = new Dictionary<ConstructorInfo, ParameterInfo[]>();
+			foreach (var con in type.GetConstructors())
+				DerivedTypeConstructorsInfoParams.Add(con, con.GetParameters());
 		}
 
 		public dynamic GetInstance(Cache cache, params object[] parameters)
 		{
-			dynamic instance = DerivedTypeConstructorInfo.Invoke(parameters);
+			dynamic instance = GetConstructorInfo(parameters).Invoke(parameters);
 			if (instance is ICacheType)
 				instance.__Cache__ = cache;
 			return instance;
+		}
+
+		public ConstructorInfo GetConstructorInfo(object[] parameters)
+		{
+			ConstructorInfo ctorRet = null;
+			int lastParamCntMatch = 0;
+			foreach (var ctor in DerivedTypeConstructorsInfoParams)
+			{
+				if (ctor.Value.Length < parameters.Length || ctor.Value.Length < lastParamCntMatch) continue;
+
+				int i = 0;
+				for (; i < parameters.Length; i++)
+				{
+					if (ctor.Value[i].ParameterType.IsInstanceOfType(parameters[i]))
+						continue;
+					else if (parameters[i] == null
+						&& ctor.Value[i].ParameterType.IsValueType && Nullable.GetUnderlyingType(ctor.Value[i].ParameterType) == null)
+						break;
+				}
+
+				if (lastParamCntMatch < i)
+				{
+					ctorRet = ctor.Key;
+					if (i == parameters.Length) break;
+					lastParamCntMatch = i;
+				}
+			}
+
+			return ctorRet;
 		}
 	}
 

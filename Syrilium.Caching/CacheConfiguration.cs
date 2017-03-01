@@ -227,12 +227,6 @@ namespace Syrilium.Caching
 			All = true;
 			return this;
 		}
-
-		public ICacheTypeConfiguration<T> ConstructorParams(Type[] types)
-		{
-			base.ConstructorParamTypes = types;
-			return this;
-		}
 	}
 
 	public class CacheMethodConfiguration
