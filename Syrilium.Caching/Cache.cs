@@ -1011,12 +1011,12 @@ namespace Syrilium.Caching
 			return this;
 		}
 
-		public ICache AppendClearBuffer<T>(Expression<Action<T>> action, bool exactMethodCall = true, bool exactType = true)
+		public ICache AppendClearBuffer<T>(Expression<Action<T>> method, bool exactMethodCall = true, bool exactType = true)
 		{
-			if (!(action.Body is MethodCallExpression))
+			if (!(method.Body is MethodCallExpression))
 				throw new InvalidOperationException("Action must contain method.");
 
-			var mce = ((MethodCallExpression)action.Body);
+			var mce = ((MethodCallExpression)method.Body);
 			var parameters = exactMethodCall ? mce.Arguments.Select(a => ((ConstantExpression)a).Value).ToArray() : null;
 
 			clearBufferMethod.Write(cw =>

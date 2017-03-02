@@ -24,6 +24,7 @@ namespace Syrilium.CachingInterface
 		ICache AppendClearBuffer(object result);
 		ICache AppendClearBuffer<T>(bool exactType = false);
 		ICache AppendClearBuffer(Type cachedType, bool exactType = false);
+		ICache AppendClearBuffer<T>(Expression<Action<T>> method, bool exactMethodCall = true, bool exactType = true);
 		void Clear();
 		void ClearAll();
 		bool IsDisposed { get; }
