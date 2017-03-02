@@ -9,6 +9,7 @@ using System.Collections;
 using Syrilium.CommonInterface;
 using Syrilium.Common;
 using Syrilium.CachingInterface;
+using System.Linq.Expressions;
 
 namespace Syrilium.Caching
 {
@@ -33,12 +34,13 @@ namespace Syrilium.Caching
 		private static int lastClearTime;
 		private static long startingSecond;
 		private static System.Timers.Timer clearTimer;
-		private static ReaderWriterLockWrapper<Dictionary<int, Dictionary<Cache, List<CacheInfo>>>> valuesExpiration;
+		private static ReaderWriterLockWrapper<Dictionary<int, Dictionary<Cache, List<CachedValueInfo>>>> valuesExpiration;
 
-		private ReaderWriterLockWrapper<Dictionary<string, CacheInfo>> values;
+		private ReaderWriterLockWrapper<Dictionary<string, CachedValueInfo>> values;
 		private ReaderWriterLockWrapper<Dictionary<Type, DerivedTypeCache>> typeDerivedMapping;
 		private ReaderWriterLockWrapper<List<object>> clearBufferResult;
 		private ReaderWriterLockWrapper<List<KeyValuePair<Type, bool>>> clearBufferCachedType;
+		private ReaderWriterLockWrapper<List<Tuple<Type, MethodInfo, object[], bool>>> clearBufferMethod;
 		private bool inConfigurationsCollectionChanged = false;
 
 		public ReaderWriterLockWrapper<ObservableCollection<ICacheTypeConfiguration>> Configurations { get; private set; }
@@ -60,7 +62,7 @@ namespace Syrilium.Caching
 			modBuilder = asmBuilder.DefineDynamicModule(asmBuilder.GetName().Name, false);
 			hashDerivedTypeMapping = new ReaderWriterLockWrapper<Dictionary<string, DerivedTypeCache>>();
 			hashMethodMapping = new ReaderWriterLockWrapper<Dictionary<string, DerivedMethodCache>>();
-			valuesExpiration = new ReaderWriterLockWrapper<Dictionary<int, Dictionary<Cache, List<CacheInfo>>>>();
+			valuesExpiration = new ReaderWriterLockWrapper<Dictionary<int, Dictionary<Cache, List<CachedValueInfo>>>>();
 
 			startingSecond = (long)Math.Floor(TimeSpan.FromTicks(DateTime.Now.Ticks).TotalSeconds) - 1;
 			clearTimer = new System.Timers.Timer(1000);
@@ -87,9 +89,10 @@ namespace Syrilium.Caching
 
 		public Cache()
 		{
-			values = new ReaderWriterLockWrapper<Dictionary<string, CacheInfo>>();
+			values = new ReaderWriterLockWrapper<Dictionary<string, CachedValueInfo>>();
 			clearBufferResult = new ReaderWriterLockWrapper<List<object>>();
 			clearBufferCachedType = new ReaderWriterLockWrapper<List<KeyValuePair<Type, bool>>>();
+			clearBufferMethod = new ReaderWriterLockWrapper<List<Tuple<Type, MethodInfo, object[], bool>>>();
 			typeDerivedMapping = new ReaderWriterLockWrapper<Dictionary<Type, DerivedTypeCache>>();
 
 			var typeColl = new ObservableCollection<ICacheTypeConfiguration>();
@@ -548,7 +551,7 @@ namespace Syrilium.Caching
 				}
 
 				var derivedType = typeBuilder.CreateType();
-				dtc = new DerivedTypeCache(derivedType, baseType);
+				dtc = new DerivedTypeCache(derivedType, baseType, typeHash);
 				foreach (var cbm in callBaseMethodsRaw)
 					derivedMethodCaches.Add(Tuple.Create(cbm.Item1, new DerivedMethodCache
 					{
@@ -556,11 +559,12 @@ namespace Syrilium.Caching
 						BaseMethod = cbm.Item2,
 						CallBaseMethod = derivedType.GetMethod(cbm.Item3, BindingFlags.NonPublic | BindingFlags.Instance),
 						ParameterTypes = cbm.Item4,
-						ParamsForKey = cbm.Item5
+						ParamsForKey = cbm.Item5,
+						Hash = cbm.Item1
 					}));
 			}
 			else
-				dtc = new DerivedTypeCache(baseType, baseType);
+				dtc = new DerivedTypeCache(baseType, baseType, typeHash);
 
 			return dtc;
 		}
@@ -777,9 +781,30 @@ namespace Syrilium.Caching
 			return cryptography.GetMurmur3Hash(sb.ToString());
 		}
 
-		private static CacheInfo createCacheInfo(DerivedMethodCache derivedMethodCache, string key, dynamic result, object[] parameters, Type[] parameterTypes)
+		private static string generateKey(string methodHash, object[] parameters, int[] paramIndexes, MethodInfo callBaseMethod)
 		{
-			CacheInfo cacheInfo = new CacheInfo();
+			Type[] genericArguments;
+			if (callBaseMethod.IsGenericMethod)
+				genericArguments = callBaseMethod.GetGenericArguments();
+			else
+				genericArguments = null;
+
+			return generateKey(methodHash, parameters, paramIndexes, ref callBaseMethod, genericArguments);
+		}
+
+		private static string generateKey(string methodHash, object[] parameters, int[] paramIndexes, ref MethodInfo callBaseMethod, Type[] genericArguments = null)
+		{
+			if (genericArguments != null)
+			{
+				callBaseMethod = callBaseMethod.MakeGenericMethod(genericArguments);
+				methodHash = string.Concat(methodHash, "_", callBaseMethod.MethodHandle.Value);
+			}
+			return generateKey(methodHash, parameters, paramIndexes);
+		}
+
+		private static CachedValueInfo createCachedValueInfo(DerivedMethodCache derivedMethodCache, string key, dynamic result, object[] parameters, Type[] parameterTypes)
+		{
+			CachedValueInfo cacheInfo = new CachedValueInfo();
 			cacheInfo.DerivedMethodCache = derivedMethodCache;
 			cacheInfo.Key = key;
 			cacheInfo.Result = result;
@@ -798,17 +823,10 @@ namespace Syrilium.Caching
 		{
 			Cache cache = instance.__Cache__;
 			DerivedMethodCache dmc = hashMethodMapping.Read(mw => mw.Value[methodHash]);
-			MethodInfo callBaseMethod;
-			if (genericArguments == null)
-				callBaseMethod = dmc.CallBaseMethod;
-			else
-			{
-				callBaseMethod = dmc.CallBaseMethod.MakeGenericMethod(genericArguments);
-				methodHash = string.Concat(methodHash, "_", callBaseMethod.MethodHandle.Value);
-			}
-			string key = generateKey(methodHash, parameters, dmc.ParamsForKey);
+			MethodInfo callBaseMethod = dmc.CallBaseMethod;
+			string key = generateKey(methodHash, parameters, dmc.ParamsForKey, ref callBaseMethod, genericArguments);
 
-			CacheInfo cacheInfo = null;
+			CachedValueInfo cacheInfo = null;
 			dynamic result = cache.values.ConditionalReadWrite(
 				v => !v.ContainsKey(key),
 				v =>
@@ -820,7 +838,7 @@ namespace Syrilium.Caching
 				v =>
 				{
 					dynamic res = callBaseMethod.Invoke(instance, parameters);
-					v[key] = cacheInfo = createCacheInfo(dmc, key, res, parameters, dmc.ParameterTypes);
+					v[key] = cacheInfo = createCachedValueInfo(dmc, key, res, parameters, dmc.ParameterTypes);
 					return res;
 				});
 
@@ -833,7 +851,7 @@ namespace Syrilium.Caching
 		{
 			valuesExpiration.Write(ve =>
 			 {
-				 var p = (Tuple<Cache, CacheInfo>)obj;
+				 var p = (Tuple<Cache, CachedValueInfo>)obj;
 				 var cacheInfo = p.Item2;
 				 if (cacheInfo.IsDisposed) return;
 				 var cache = p.Item1;
@@ -862,16 +880,16 @@ namespace Syrilium.Caching
 							 if (cacheTimeExp.ContainsKey(p.Item1))
 								 cacheTimeExp[cache].Add(cacheInfo);
 							 else
-								 cacheTimeExp[cache] = new List<CacheInfo>() { cacheInfo };
+								 cacheTimeExp[cache] = new List<CachedValueInfo>() { cacheInfo };
 						 }
 						 else
-							 ve[expiresAt.Value] = new Dictionary<Cache, List<CacheInfo>>() { { cache, new List<CacheInfo>() { cacheInfo } } };
+							 ve[expiresAt.Value] = new Dictionary<Cache, List<CachedValueInfo>>() { { cache, new List<CachedValueInfo>() { cacheInfo } } };
 					 }
 				 }
 			 });
 		}
 
-		private int? getExpiresAt(CacheInfo cacheInfo, MethodInfo mi)
+		private int? getExpiresAt(CachedValueInfo cacheInfo, MethodInfo mi)
 		{
 			var configs = GetTypeConfigurations(cacheInfo.DerivedMethodCache.DerivedTypeCache.BaseType);
 			if (configs.Count == 0) return null;
@@ -993,18 +1011,36 @@ namespace Syrilium.Caching
 			return this;
 		}
 
+		public ICache AppendClearBuffer<T>(Expression<Action<T>> action, bool exactMethodCall = true, bool exactType = true)
+		{
+			if (!(action.Body is MethodCallExpression))
+				throw new InvalidOperationException("Action must contain method.");
+
+			var mce = ((MethodCallExpression)action.Body);
+			var parameters = exactMethodCall ? mce.Arguments.Select(a => ((ConstantExpression)a).Value).ToArray() : null;
+
+			clearBufferMethod.Write(cw =>
+			{
+				cw.Add(new Tuple<Type, MethodInfo, object[], bool>(typeof(T), mce.Method, parameters, exactType));
+			});
+
+			return this;
+		}
+
 		public void Clear()
 		{
 			clearByResult();
 			clearByCachedType();
+			clearByMethod();
 		}
 
 		public void ClearAll()
 		{
-			ReadWriteLock.Lock(new[] { clearBufferResult.W, clearBufferCachedType.W, values.W, valuesExpiration.W }, () =>
+			ReadWriteLock.Lock(new[] { clearBufferResult.W, clearBufferCachedType.W, clearBufferMethod.W, values.W, valuesExpiration.W }, () =>
 			{
 				clearBufferResult.Value.Clear();
 				clearBufferCachedType.Value.Clear();
+				clearBufferMethod.Value.Clear();
 				clearValuesExpiration(valuesExpiration.Value, values.Value.Values);
 				foreach (var cacheInfo in values.Value.Values)
 					cacheInfo.Dispose();
@@ -1012,7 +1048,7 @@ namespace Syrilium.Caching
 			});
 		}
 
-		private void clearValuesExpiration(Dictionary<int, Dictionary<Cache, List<CacheInfo>>> valuesExpiration, IEnumerable<CacheInfo> cacheInfos)
+		private void clearValuesExpiration(Dictionary<int, Dictionary<Cache, List<CachedValueInfo>>> valuesExpiration, IEnumerable<CachedValueInfo> cacheInfos)
 		{
 			var valExpForRemove = new List<int>();
 			foreach (var ve in valuesExpiration)
@@ -1038,10 +1074,10 @@ namespace Syrilium.Caching
 		{
 			ReadWriteLock.Lock(new[] { clearBufferResult.W, values.W, valuesExpiration.W }, () =>
 			{
-				Dictionary<string, CacheInfo> cacheKeysForDelete = new Dictionary<string, CacheInfo>();
+				Dictionary<string, CachedValueInfo> cacheKeysForDelete = new Dictionary<string, CachedValueInfo>();
 				foreach (object result in clearBufferResult.Value)
 				{
-					foreach (KeyValuePair<string, CacheInfo> ci in values.Value)
+					foreach (KeyValuePair<string, CachedValueInfo> ci in values.Value)
 					{
 						if (ci.Value.Result == result)
 						{
@@ -1064,12 +1100,12 @@ namespace Syrilium.Caching
 		{
 			ReadWriteLock.Lock(new[] { clearBufferCachedType.W, values.W, valuesExpiration.W }, () =>
 			{
-				Dictionary<string, CacheInfo> cacheKeysForDelete = new Dictionary<string, CacheInfo>();
+				Dictionary<string, CachedValueInfo> cacheKeysForDelete = new Dictionary<string, CachedValueInfo>();
 				foreach (KeyValuePair<Type, bool> cachedType in clearBufferCachedType.Value)
 				{
 					if (cachedType.Value)
 					{
-						foreach (KeyValuePair<string, CacheInfo> ci in values.Value)
+						foreach (KeyValuePair<string, CachedValueInfo> ci in values.Value)
 						{
 							if (ci.Value.DerivedMethodCache.DerivedTypeCache.BaseType == cachedType.Key)
 							{
@@ -1080,7 +1116,7 @@ namespace Syrilium.Caching
 					}
 					else
 					{
-						foreach (KeyValuePair<string, CacheInfo> ci in values.Value)
+						foreach (KeyValuePair<string, CachedValueInfo> ci in values.Value)
 						{
 							if (cachedType.Key.IsAssignableFrom(ci.Value.DerivedMethodCache.DerivedTypeCache.BaseType))
 							{
@@ -1100,12 +1136,56 @@ namespace Syrilium.Caching
 			});
 		}
 
+		private void clearByMethod()
+		{
+			ReadWriteLock.Lock(new[] { clearBufferMethod.W, values.W, valuesExpiration.W, hashMethodMapping.R }, () =>
+			{
+				Dictionary<string, CachedValueInfo> cacheKeysForDelete = new Dictionary<string, CachedValueInfo>();
+				foreach (var bufferItem in clearBufferMethod.Value)
+				{
+					var derivedMethodsCache = new Dictionary<DerivedMethodCache, string>();
+
+					foreach (var dmc in hashMethodMapping.Value.Values)
+					{
+						if (dmc.BaseMethod == bufferItem.Item2
+							&& (!bufferItem.Item4 || dmc.DerivedTypeCache.BaseType == bufferItem.Item1))
+						{
+							string key = null;
+							if (bufferItem.Item3 != null)
+								key = generateKey(dmc.Hash, bufferItem.Item3, dmc.ParamsForKey, dmc.CallBaseMethod);
+							derivedMethodsCache[dmc] = key;
+						}
+					}
+
+					foreach (var dmc in derivedMethodsCache)
+					{
+						foreach (KeyValuePair<string, CachedValueInfo> ci in values.Value)
+						{
+							if (ci.Value.DerivedMethodCache == dmc.Key && (dmc.Value == null || ci.Key == dmc.Value))
+							{
+								ci.Value.Dispose();
+								cacheKeysForDelete.Add(ci.Key, ci.Value);
+							}
+						}
+					}
+				}
+
+				foreach (string key in cacheKeysForDelete.Keys)
+					values.Value.Remove(key);
+
+				clearValuesExpiration(valuesExpiration.Value, cacheKeysForDelete.Values);
+
+				clearBufferMethod.Value.Clear();
+			});
+		}
+
 		public void Dispose()
 		{
 			ClearAll();
 			values = null;
 			clearBufferResult = null;
 			clearBufferCachedType = null;
+			clearBufferMethod = null;
 			Configurations.Write(c => c.Clear());
 			Configurations = null;
 			typeDerivedMapping.Write(tdm => tdm.Clear());
@@ -1118,6 +1198,8 @@ namespace Syrilium.Caching
 	{
 		public Type DerivedType { get; set; }
 		public Type BaseType { get; set; }
+
+		public string Hash { get; set; }
 		public Dictionary<ConstructorInfo, ParameterInfo[]> DerivedTypeConstructorsInfoParams { get; set; }
 
 		public DerivedTypeCache()
@@ -1125,11 +1207,12 @@ namespace Syrilium.Caching
 
 		}
 
-		public DerivedTypeCache(Type type, Type baseType)
+		public DerivedTypeCache(Type type, Type baseType, string hash)
 			: this()
 		{
 			DerivedType = type;
 			BaseType = baseType;
+			Hash = hash;
 			DerivedTypeConstructorsInfoParams = new Dictionary<ConstructorInfo, ParameterInfo[]>();
 			foreach (var con in type.GetConstructors())
 				DerivedTypeConstructorsInfoParams.Add(con, con.GetParameters());
@@ -1180,9 +1263,10 @@ namespace Syrilium.Caching
 		public MethodInfo CallBaseMethod { get; set; }
 		public Type[] ParameterTypes { get; set; }
 		public int[] ParamsForKey { get; set; }
+		public string Hash { get; set; }
 	}
 
-	public class CacheInfo : IDisposable
+	public class CachedValueInfo : IDisposable
 	{
 		public string Key { get; set; }
 		public object Result { get; set; }
@@ -1192,7 +1276,7 @@ namespace Syrilium.Caching
 		public DateTime? Created { get; set; }
 		public bool IsDisposed { get; private set; }
 
-		public CacheInfo()
+		public CachedValueInfo()
 		{
 			Created = DateTime.Now;
 		}
