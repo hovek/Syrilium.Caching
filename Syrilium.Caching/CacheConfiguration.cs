@@ -282,7 +282,7 @@ namespace Syrilium.Caching
 				throw new InvalidOperationException("Method \"" + name + "\" does not exist on \"" + type.Name + "\" type.");
 
 			if (!Cache.IsMethodValid(methodOnType, true))
-				throw new InvalidOperationException("Method \"" + methodOnType.Name + "\" has to be virtual non internal and have return type or ref parameter/s.");
+				throw new InvalidOperationException("Method \"" + methodOnType.Name + "\" has to be virtual and non internal.");
 
 			MethodInfo = methodOnType;
 

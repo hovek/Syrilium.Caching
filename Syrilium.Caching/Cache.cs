@@ -1229,7 +1229,7 @@ namespace Syrilium.Caching
 		public ConstructorInfo GetConstructorInfo(object[] parameters)
 		{
 			ConstructorInfo ctorRet = null;
-			int lastParamCntMatch = 0;
+			int lastParamCntMatch = -1;
 			foreach (var ctor in DerivedTypeConstructorsInfoParams)
 			{
 				if (ctor.Value.Length < parameters.Length || ctor.Value.Length < lastParamCntMatch) continue;
