@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
@@ -178,6 +179,39 @@ namespace Syrilium.CommonInterface
 			var wrapper = new Wrap<T>(obj);
 			if (wrapperCollection != null) wrapperCollection.Add(wrapper);
 			return wrapper;
+		}
+		#endregion
+
+		#region Expression
+		public static MethodInfo ExtractMethodObjects(this LambdaExpression mtd, out object instance, out object[] parameters)
+		{
+			var methodCallExpression = mtd.Body as MethodCallExpression;
+
+			if (methodCallExpression.Object is ConstantExpression)
+			{
+				var constantExpression = methodCallExpression.Object as ConstantExpression;
+				instance = constantExpression.Value;
+			}
+			else
+			{
+				var obj = ((ConstantExpression)((dynamic)methodCallExpression.Object).Expression).Value;
+				FieldInfo member = ((dynamic)methodCallExpression.Object).Member;
+				instance = member.GetValue(obj);
+			}
+
+			parameters = new object[methodCallExpression.Arguments.Count];
+			for (int i = 0; i < methodCallExpression.Arguments.Count; i++)
+			{
+				if (methodCallExpression.Arguments[i] is ConstantExpression)
+					parameters[i] = ((ConstantExpression)methodCallExpression.Arguments[i]).Value;
+				else
+				{
+					var obj = ((ConstantExpression)((dynamic)methodCallExpression.Arguments[i]).Expression).Value;
+					FieldInfo member = ((dynamic)methodCallExpression.Arguments[i]).Member;
+					parameters[i] = member.GetValue(obj);
+				}
+			}
+			return methodCallExpression.Method;
 		}
 		#endregion
 	}

@@ -41,6 +41,7 @@ namespace Syrilium.Caching
 		private ReaderWriterLockWrapper<List<object>> clearBufferResult;
 		private ReaderWriterLockWrapper<List<KeyValuePair<Type, bool>>> clearBufferCachedType;
 		private ReaderWriterLockWrapper<List<Tuple<Type, MethodInfo, object[], bool>>> clearBufferMethod;
+		private ReaderWriterLockWrapper<List<string>> clearBufferKey;
 		private bool inConfigurationsCollectionChanged = false;
 
 		public ReaderWriterLockWrapper<ObservableCollection<ICacheTypeConfiguration>> Configurations { get; private set; }
@@ -55,6 +56,9 @@ namespace Syrilium.Caching
 			get;
 			private set;
 		}
+
+		public bool ClearGroupKeys { get; set; }
+		public ReaderWriterLockWrapper<Dictionary<string, List<string>>> GroupKeys { get; private set; }
 
 		static Cache()
 		{
@@ -93,7 +97,10 @@ namespace Syrilium.Caching
 			clearBufferResult = new ReaderWriterLockWrapper<List<object>>();
 			clearBufferCachedType = new ReaderWriterLockWrapper<List<KeyValuePair<Type, bool>>>();
 			clearBufferMethod = new ReaderWriterLockWrapper<List<Tuple<Type, MethodInfo, object[], bool>>>();
+			clearBufferKey = new ReaderWriterLockWrapper<List<string>>();
 			typeDerivedMapping = new ReaderWriterLockWrapper<Dictionary<Type, DerivedTypeCache>>();
+			ClearGroupKeys = true;
+			GroupKeys = new ReaderWriterLockWrapper<Dictionary<string, List<string>>>();
 
 			var typeColl = new ObservableCollection<ICacheTypeConfiguration>();
 			typeColl.CollectionChanged += configurations_CollectionChanged;
@@ -819,32 +826,81 @@ namespace Syrilium.Caching
 			return cacheInfo;
 		}
 
-		public static dynamic GetCached(dynamic instance, string methodHash, object[] parameters, Type[] genericArguments = null)
+		public T Exec<T>(Expression<Func<T>> mtd, string groupKey)
+		{
+			string key;
+			return exec(mtd, out key, groupKey);
+		}
+
+		public T Exec<T>(Expression<Func<T>> mtd, out string key, string groupKey = null)
+		{
+			return exec(mtd, out key, groupKey);
+		}
+
+		public string Exec(Expression<Action> mtd, string groupKey = null)
+		{
+			string key;
+			exec(mtd, out key, groupKey);
+			return key;
+		}
+
+		private dynamic exec(LambdaExpression mtd, out string key, string groupKey = null)
+		{
+			object instance;
+			object[] parameters;
+			var mi = mtd.ExtractMethodObjects(out instance, out parameters);
+			var tdm = typeDerivedMapping.Read(t => t.Value[instance.GetType().BaseType]);
+			var methodHash = generateHash(tdm.Hash, mi);
+			return GetCached2(instance, methodHash, parameters, out key, mi.IsGenericMethod ? mi.GetGenericArguments() : null, groupKey);
+		}
+
+		public static dynamic GetCached2(dynamic instance, string methodHash, object[] parameters, out string key, Type[] genericArguments = null, string groupKey = null)
 		{
 			Cache cache = instance.__Cache__;
 			DerivedMethodCache dmc = hashMethodMapping.Read(mw => mw.Value[methodHash]);
 			MethodInfo callBaseMethod = dmc.CallBaseMethod;
-			string key = generateKey(methodHash, parameters, dmc.ParamsForKey, ref callBaseMethod, genericArguments);
+			var keyTemp = key = generateKey(methodHash, parameters, dmc.ParamsForKey, ref callBaseMethod, genericArguments);
+
+			if (groupKey != null)
+			{
+				bool hasGroupKey = false;
+				cache.GroupKeys.ConditionalReadWrite(
+					k => !(hasGroupKey = k.ContainsKey(groupKey)) || !k[groupKey].Contains(keyTemp),
+					k => { },
+					k =>
+					{
+						if (hasGroupKey)
+							k[groupKey].Add(keyTemp);
+						else
+							k.Add(groupKey, new List<string> { keyTemp });
+					});
+			}
 
 			CachedValueInfo cacheInfo = null;
 			dynamic result = cache.values.ConditionalReadWrite(
-				v => !v.ContainsKey(key),
+				v => !v.ContainsKey(keyTemp),
 				v =>
 				{
-					cacheInfo = v[key];
+					cacheInfo = v[keyTemp];
 					cacheInfo.FillParameters(parameters);
 					return cacheInfo.Result;
 				},
 				v =>
 				{
 					dynamic res = callBaseMethod.Invoke(instance, parameters);
-					v[key] = cacheInfo = createCachedValueInfo(dmc, key, res, parameters, dmc.ParameterTypes);
+					v[keyTemp] = cacheInfo = createCachedValueInfo(dmc, keyTemp, res, parameters, dmc.ParameterTypes);
 					return res;
 				});
 
 			ThreadPool.QueueUserWorkItem(setExpiration, Tuple.Create(cache, cacheInfo));
 
 			return result;
+		}
+
+		public static dynamic GetCached(dynamic instance, string methodHash, object[] parameters, Type[] genericArguments = null)
+		{
+			string key;
+			return GetCached2(instance, methodHash, parameters, out key, genericArguments);
 		}
 
 		private static void setExpiration(object obj)
@@ -983,6 +1039,17 @@ namespace Syrilium.Caching
 			return derivedTypeCache.GetInstance(this, parameters);
 		}
 
+		public ICache AppendClearBufferKey(string key)
+		{
+			clearBufferKey.Write(b =>
+			{
+				if (!b.Contains(key))
+					b.Add(key);
+			});
+
+			return this;
+		}
+
 		public ICache AppendClearBuffer(object result)
 		{
 			clearBufferResult.Write(b =>
@@ -1032,11 +1099,12 @@ namespace Syrilium.Caching
 			clearByResult();
 			clearByCachedType();
 			clearByMethod();
+			clearByKey();
 		}
 
 		public void ClearAll()
 		{
-			ReadWriteLock.Lock(new[] { clearBufferResult.W, clearBufferCachedType.W, clearBufferMethod.W, values.W, valuesExpiration.W }, () =>
+			ReadWriteLock.Lock(new[] { clearBufferResult.W, clearBufferCachedType.W, clearBufferMethod.W, values.W, valuesExpiration.W, clearBufferKey.W, GroupKeys.W }, () =>
 			{
 				clearBufferResult.Value.Clear();
 				clearBufferCachedType.Value.Clear();
@@ -1045,6 +1113,9 @@ namespace Syrilium.Caching
 				foreach (var cacheInfo in values.Value.Values)
 					cacheInfo.Dispose();
 				values.Value.Clear();
+				if (ClearGroupKeys)
+					GroupKeys.Value.Clear();
+				clearBufferKey.Value.Clear();
 			});
 		}
 
@@ -1093,6 +1164,36 @@ namespace Syrilium.Caching
 				clearValuesExpiration(valuesExpiration.Value, cacheKeysForDelete.Values);
 
 				clearBufferResult.Value.Clear();
+			});
+		}
+
+		private void clearByKey()
+		{
+			ReadWriteLock.Lock(new[] { clearBufferKey.W, GroupKeys.W, values.W, valuesExpiration.W }, () =>
+			{
+				var keysToRemove = new List<string>(clearBufferKey.Value);
+				foreach (var key in clearBufferKey.Value)
+				{
+					if (GroupKeys.Value.ContainsKey(key))
+					{
+						keysToRemove.AddRange(GroupKeys.Value[key]);
+						if (ClearGroupKeys)
+							GroupKeys.Value.Remove(key);
+					}
+				}
+
+				var cacheKeysForDelete = new List<CachedValueInfo>();
+				foreach (var key in keysToRemove)
+				{
+					if (values.Value.ContainsKey(key))
+					{
+						cacheKeysForDelete.Add(values.Value[key]);
+						values.Value.Remove(key);
+					}
+				}
+
+				clearValuesExpiration(valuesExpiration.Value, cacheKeysForDelete);
+				clearBufferKey.Value.Clear();
 			});
 		}
 

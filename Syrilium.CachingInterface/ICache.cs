@@ -18,9 +18,15 @@ namespace Syrilium.CachingInterface
 	{
 		ReaderWriterLockWrapper<ObservableCollection<ICacheTypeConfiguration>> Configurations { get; }
 		ICacheConfiguration Configure { get; }
+		/// <summary>
+		/// On Clear() clear found GroupKeys.
+		/// </summary>
+		bool ClearGroupKeys { get; set; }
+		ReaderWriterLockWrapper<Dictionary<string, List<string>>> GroupKeys { get; }
 		T I<T>(params object[] parameters);
 		T I<T>(Type type, params object[] parameters);
 		dynamic I(Type type, params object[] parameters);
+		ICache AppendClearBufferKey(string key);
 		ICache AppendClearBuffer(object result);
 		ICache AppendClearBuffer<T>(bool exactType = false);
 		ICache AppendClearBuffer(Type cachedType, bool exactType = false);
