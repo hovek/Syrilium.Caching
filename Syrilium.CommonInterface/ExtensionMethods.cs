@@ -185,31 +185,32 @@ namespace Syrilium.CommonInterface
 		#region Expression
 		public static MethodInfo ExtractMethodObjects(this LambdaExpression mtd, out object instance, out object[] parameters)
 		{
+			if (!(mtd.Body is MethodCallExpression))
+				throw new InvalidOperationException("LambdaExpression must contain method.");
+
 			var methodCallExpression = mtd.Body as MethodCallExpression;
 
-			if (methodCallExpression.Object is ConstantExpression)
-				instance = ((ConstantExpression)methodCallExpression.Object).Value;
-			else
-			{
-				var memberExpression = (MemberExpression)methodCallExpression.Object;
-				var obj = ((ConstantExpression)memberExpression.Expression).Value;
-				instance = ((FieldInfo)memberExpression.Member).GetValue(obj);
-			}
+			instance = methodCallExpression.Object.GetObject();
 
 			parameters = new object[methodCallExpression.Arguments.Count];
 			for (int i = 0; i < methodCallExpression.Arguments.Count; i++)
-			{
-				if (methodCallExpression.Arguments[i] is ConstantExpression)
-					parameters[i] = ((ConstantExpression)methodCallExpression.Arguments[i]).Value;
-				else
-				{
-					var memberExpression = (MemberExpression)methodCallExpression.Arguments[i];
-					var obj = ((ConstantExpression)memberExpression.Expression).Value;
-					parameters[i] = ((FieldInfo)memberExpression.Member).GetValue(obj);
-				}
-			}
+				parameters[i] = methodCallExpression.Arguments[i].GetObject();
 
 			return methodCallExpression.Method;
+		}
+
+		public static object GetObject(this Expression exp)
+		{
+			if (exp is ConstantExpression)
+				return ((ConstantExpression)exp).Value;
+			else if (exp is MemberExpression)
+			{
+				var memberExpression = (MemberExpression)exp;
+				var obj = ((ConstantExpression)memberExpression.Expression).Value;
+				return ((FieldInfo)memberExpression.Member).GetValue(obj);
+			}
+			else
+				return ((ParameterExpression)exp).Type;
 		}
 		#endregion
 	}

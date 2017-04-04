@@ -34,7 +34,15 @@ namespace Syrilium.CachingInterface
 		void Clear();
 		void ClearAll();
 		bool IsDisposed { get; }
-
+		string GenerateKey<T>(Expression<Action<T>> mtd);
+		string GenerateKey(Expression<Action> mtd);
+		string GenerateKey(LambdaExpression mtd);
+		void AssociateGroupKey<T>(Expression<Action<T>> mtd, string groupKey);
+		void AssociateGroupKey(Expression<Action> mtd, string groupKey);
+		void AssociateGroupKey(LambdaExpression mtd, string groupKey);
+		void AssociateGroupKey(string key, string groupKey);
+		string GetMethodHash(LambdaExpression mtd, out object[] parameters);
+		string GetMethodHash(LambdaExpression mtd, out MethodInfo methodInfo, out object instance, out object[] parameters);
 	}
 
 	public interface ICacheType

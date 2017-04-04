@@ -778,6 +778,55 @@ namespace Syrilium.Caching
 			return sb.ToString();
 		}
 
+		public void AssociateGroupKey<T>(Expression<Action<T>> mtd, string groupKey)
+		{
+			AssociateGroupKey((LambdaExpression)mtd, groupKey);
+		}
+
+		public void AssociateGroupKey(Expression<Action> mtd, string groupKey)
+		{
+			AssociateGroupKey((LambdaExpression)mtd, groupKey);
+		}
+
+		public void AssociateGroupKey(LambdaExpression mtd, string groupKey)
+		{
+			AssociateGroupKey(GenerateKey(mtd), groupKey);
+		}
+
+		public void AssociateGroupKey(string key, string groupKey)
+		{
+			bool hasGroupKey = false;
+			GroupKeys.ConditionalReadWrite(
+				k => !(hasGroupKey = k.ContainsKey(groupKey)) || !k[groupKey].Contains(key),
+				k => { },
+				k =>
+				{
+					if (hasGroupKey)
+						k[groupKey].Add(key);
+					else
+						k.Add(groupKey, new List<string> { key });
+				});
+		}
+
+
+		public string GenerateKey<T>(Expression<Action<T>> mtd)
+		{
+			return GenerateKey((LambdaExpression)mtd);
+		}
+
+		public string GenerateKey(Expression<Action> mtd)
+		{
+			return GenerateKey((LambdaExpression)mtd);
+		}
+
+		public string GenerateKey(LambdaExpression mtd)
+		{
+			object[] parameters;
+			var methodHash = GetMethodHash(mtd, out parameters);
+			var dmc = hashMethodMapping.Read(mw => mw.Value[methodHash]);
+			return generateKey(methodHash, parameters, dmc.ParamsForKey, dmc.CallBaseMethod);
+		}
+
 		private static string generateKey(string methodHash, object[] parameters, int[] paramIndexes)
 		{
 			StringBuilder sb = new StringBuilder();
@@ -846,35 +895,40 @@ namespace Syrilium.Caching
 
 		private dynamic exec(LambdaExpression mtd, out string key, string groupKey = null)
 		{
+			MethodInfo methodInfo;
 			object instance;
 			object[] parameters;
-			var mi = mtd.ExtractMethodObjects(out instance, out parameters);
-			var tdm = typeDerivedMapping.Read(t => t.Value[instance.GetType().BaseType]);
-			var methodHash = generateHash(tdm.Hash, mi);
-			return GetCached2(instance, methodHash, parameters, out key, mi.IsGenericMethod ? mi.GetGenericArguments() : null, groupKey);
+			var methodHash = GetMethodHash(mtd, out methodInfo, out instance, out parameters);
+			var rez = GetCached2(instance, methodHash, parameters, out key, methodInfo.IsGenericMethod ? methodInfo.GetGenericArguments() : null);
+
+			if (groupKey != null)
+				AssociateGroupKey(key, groupKey);
+
+			return rez;
 		}
 
-		public static dynamic GetCached2(dynamic instance, string methodHash, object[] parameters, out string key, Type[] genericArguments = null, string groupKey = null)
+		public string GetMethodHash(LambdaExpression mtd, out object[] parameters)
 		{
-			Cache cache = instance.__Cache__;
+			MethodInfo methodInfo;
+			object instance;
+			return GetMethodHash(mtd, out methodInfo, out instance, out parameters);
+		}
+
+		public string GetMethodHash(LambdaExpression mtd, out MethodInfo methodInfo, out object instance, out object[] parameters)
+		{
+			methodInfo = mtd.ExtractMethodObjects(out instance, out parameters);
+			var inst = instance;
+			var tdm = typeDerivedMapping.Read(t => t.Value[inst is Type ? (Type)inst : inst.GetType().BaseType]);
+			return generateHash(tdm.Hash, methodInfo);
+		}
+
+		public static dynamic GetCached2(dynamic instance, string methodHash, object[] parameters, out string key, Type[] genericArguments = null)
+		{
 			DerivedMethodCache dmc = hashMethodMapping.Read(mw => mw.Value[methodHash]);
 			MethodInfo callBaseMethod = dmc.CallBaseMethod;
 			var keyTemp = key = generateKey(methodHash, parameters, dmc.ParamsForKey, ref callBaseMethod, genericArguments);
 
-			if (groupKey != null)
-			{
-				bool hasGroupKey = false;
-				cache.GroupKeys.ConditionalReadWrite(
-					k => !(hasGroupKey = k.ContainsKey(groupKey)) || !k[groupKey].Contains(keyTemp),
-					k => { },
-					k =>
-					{
-						if (hasGroupKey)
-							k[groupKey].Add(keyTemp);
-						else
-							k.Add(groupKey, new List<string> { keyTemp });
-					});
-			}
+			Cache cache = instance.__Cache__;
 
 			CachedValueInfo cacheInfo = null;
 			dynamic result = cache.values.ConditionalReadWrite(
@@ -1084,7 +1138,7 @@ namespace Syrilium.Caching
 				throw new InvalidOperationException("Action must contain method.");
 
 			var mce = ((MethodCallExpression)method.Body);
-			var parameters = exactMethodCall ? mce.Arguments.Select(a => ((ConstantExpression)a).Value).ToArray() : null;
+			var parameters = exactMethodCall ? mce.Arguments.Select(a => a.GetObject()).ToArray() : null;
 
 			clearBufferMethod.Write(cw =>
 			{
@@ -1287,10 +1341,12 @@ namespace Syrilium.Caching
 			clearBufferResult = null;
 			clearBufferCachedType = null;
 			clearBufferMethod = null;
+			clearBufferKey = null;
 			Configurations.Write(c => c.Clear());
 			Configurations = null;
 			typeDerivedMapping.Write(tdm => tdm.Clear());
 			typeDerivedMapping = null;
+			GroupKeys = null;
 			IsDisposed = true;
 		}
 	}
