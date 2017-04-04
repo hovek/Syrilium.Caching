@@ -9,15 +9,19 @@ namespace Syrilium.Common
 {
 	public class ImageHelper : IImageHelper
 	{
-		public Image Resize(Stream imageStream, int targetWidth, int targetHeight)
+		public Image Resize(Stream imageStream, int targetWidth, int targetHeight, ImageResizeType imageResizeType = ImageResizeType.KeepRatioFill)
 		{
 			using (Image originalImage = Image.FromStream(imageStream))
-				return Resize(originalImage, targetWidth, targetHeight);
+				return Resize(originalImage, targetWidth, targetHeight, imageResizeType);
 		}
 
-		public Image Resize(Image image, int targetWidth, int targetHeight)
+		public Image Resize(Image image, int targetWidth, int targetHeight, ImageResizeType imageResizeType = ImageResizeType.KeepRatioFill)
 		{
-			Size correctedSize = CorrectTargetSize(new Size(targetWidth, targetHeight), new Size(image.Width, image.Height));
+			Size correctedSize;
+			if (imageResizeType == ImageResizeType.KeepRatioFill)
+				correctedSize = CorrectTargetSizeKeepRatioFill(new Size(targetWidth, targetHeight), new Size(image.Width, image.Height));
+			else
+				correctedSize = CorrectTargetSizeKeepRatioBox(new Size(targetWidth, targetHeight), new Size(image.Width, image.Height));
 
 			Bitmap bitmap = new Bitmap(correctedSize.Width, correctedSize.Height);
 			bitmap.SetResolution(image.HorizontalResolution, image.VerticalResolution);
@@ -33,7 +37,28 @@ namespace Syrilium.Common
 			return bitmap;
 		}
 
-		public Size CorrectTargetSize(Size target, Size source)
+		public Size CorrectTargetSizeKeepRatioBox(Size target, Size source)
+		{
+			Size targetSize = new Size();
+
+			decimal targetRatio = (decimal)target.Width / (decimal)target.Height;
+			decimal sourceRatio = (decimal)source.Width / (decimal)source.Height;
+
+			if (sourceRatio < targetRatio)
+			{
+				targetSize.Height = target.Height;
+				targetSize.Width = (int)((decimal)targetSize.Height * sourceRatio);
+			}
+			else
+			{
+				decimal ratio = (decimal)source.Height / (decimal)source.Width;
+				targetSize.Width = target.Width;
+				targetSize.Height = (int)((decimal)targetSize.Width * ratio);
+			}
+			return targetSize;
+		}
+
+		public Size CorrectTargetSizeKeepRatioFill(Size target, Size source)
 		{
 			Size targetSize = new Size();
 
@@ -68,7 +93,7 @@ namespace Syrilium.Common
 			return onNotExistsReturnEmpty && !createImageFormat ? "" : fullReturnPath;
 		}
 
-		public void CreateImageFormat(string pathToOriginal, string pathToFormated, string imageName, int imageHeight, int imageWidth)
+		public void CreateImageFormat(string pathToOriginal, string pathToFormated, string imageName, int imageHeight, int imageWidth, ImageResizeType imageResizeType = ImageResizeType.KeepRatioFill)
 		{
 			string serverPathToFormated = HttpContext.Current.Server.MapPath(pathToFormated);
 			if (!Directory.Exists(serverPathToFormated))
@@ -77,7 +102,7 @@ namespace Syrilium.Common
 			Image newImage;
 			pathToOriginal = HttpContext.Current.Server.MapPath(string.Concat(pathToOriginal, imageName));
 			using (FileStream fs = File.OpenRead(pathToOriginal))
-				newImage = new ImageHelper().Resize(fs, imageWidth, imageHeight);
+				newImage = new ImageHelper().Resize(fs, imageWidth, imageHeight, imageResizeType);
 			try
 			{
 				string pathToImageFormated = Path.Combine(serverPathToFormated, imageName);

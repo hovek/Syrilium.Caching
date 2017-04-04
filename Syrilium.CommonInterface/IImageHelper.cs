@@ -8,14 +8,23 @@ using System.Text;
 
 namespace Syrilium.CommonInterface
 {
-    public interface IImageHelper
-    {
-        Image Resize(Stream imageStream, int targetWidth, int targetHeight);
-        Image Resize(Image image, int targetWidth, int targetHeight);
-        Size CorrectTargetSize(Size target, Size source);
+	public enum ImageResizeType
+	{
+		KeepRatioFill = 0,
+		/// <summary>
+		/// Image cannot be bigger than target size.
+		/// </summary>
+		KeepRatioBox = 1
+	}
 
-        ImageFormat GetImageFormatByFileExtension(string fileName);
-        void CreateImageFormat(string pathToOriginal, string pathToFormated, string imageName, int imageHeight, int imageWidth);
-        string CheckAndGetImagePath(string pathToOriginal, string pathToFormated, string imageName, out bool createImageFormat, bool onNotExistsReturnEmpty = false);
-    }
+	public interface IImageHelper
+	{
+		Image Resize(Stream imageStream, int targetWidth, int targetHeight, ImageResizeType imageResizeType = ImageResizeType.KeepRatioFill);
+		Image Resize(Image image, int targetWidth, int targetHeight, ImageResizeType imageResizeType = ImageResizeType.KeepRatioFill);
+		Size CorrectTargetSizeKeepRatioFill(Size target, Size source);
+
+		ImageFormat GetImageFormatByFileExtension(string fileName);
+		void CreateImageFormat(string pathToOriginal, string pathToFormated, string imageName, int imageHeight, int imageWidth, ImageResizeType imageResizeType = ImageResizeType.KeepRatioFill);
+		string CheckAndGetImagePath(string pathToOriginal, string pathToFormated, string imageName, out bool createImageFormat, bool onNotExistsReturnEmpty = false);
+	}
 }
