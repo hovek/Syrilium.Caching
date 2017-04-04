@@ -188,15 +188,12 @@ namespace Syrilium.CommonInterface
 			var methodCallExpression = mtd.Body as MethodCallExpression;
 
 			if (methodCallExpression.Object is ConstantExpression)
-			{
-				var constantExpression = methodCallExpression.Object as ConstantExpression;
-				instance = constantExpression.Value;
-			}
+				instance = ((ConstantExpression)methodCallExpression.Object).Value;
 			else
 			{
-				var obj = ((ConstantExpression)((dynamic)methodCallExpression.Object).Expression).Value;
-				FieldInfo member = ((dynamic)methodCallExpression.Object).Member;
-				instance = member.GetValue(obj);
+				var memberExpression = (MemberExpression)methodCallExpression.Object;
+				var obj = ((ConstantExpression)memberExpression.Expression).Value;
+				instance = ((FieldInfo)memberExpression.Member).GetValue(obj);
 			}
 
 			parameters = new object[methodCallExpression.Arguments.Count];
@@ -206,11 +203,12 @@ namespace Syrilium.CommonInterface
 					parameters[i] = ((ConstantExpression)methodCallExpression.Arguments[i]).Value;
 				else
 				{
-					var obj = ((ConstantExpression)((dynamic)methodCallExpression.Arguments[i]).Expression).Value;
-					FieldInfo member = ((dynamic)methodCallExpression.Arguments[i]).Member;
-					parameters[i] = member.GetValue(obj);
+					var memberExpression = (MemberExpression)methodCallExpression.Arguments[i];
+					var obj = ((ConstantExpression)memberExpression.Expression).Value;
+					parameters[i] = ((FieldInfo)memberExpression.Member).GetValue(obj);
 				}
 			}
+
 			return methodCallExpression.Method;
 		}
 		#endregion
