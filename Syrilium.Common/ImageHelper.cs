@@ -1,4 +1,5 @@
 ﻿using Syrilium.CommonInterface;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -102,7 +103,16 @@ namespace Syrilium.Common
 			Image newImage;
 			pathToOriginal = HttpContext.Current.Server.MapPath(string.Concat(pathToOriginal, imageName));
 			using (FileStream fs = File.OpenRead(pathToOriginal))
-				newImage = new ImageHelper().Resize(fs, imageWidth, imageHeight, imageResizeType);
+			{
+				try
+				{
+					newImage = new ImageHelper().Resize(fs, imageWidth, imageHeight, imageResizeType);
+				}
+				catch (Exception ex)
+				{
+					throw new System.Exception(ex.Message + " " + pathToOriginal);
+				}
+			}
 			try
 			{
 				string pathToImageFormated = Path.Combine(serverPathToFormated, imageName);
