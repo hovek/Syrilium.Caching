@@ -18,6 +18,7 @@ namespace Syrilium.CachingInterface
 	{
 		ReaderWriterLockWrapper<ObservableCollection<ICacheTypeConfiguration>> Configurations { get; }
 		ICacheConfiguration Configure { get; }
+		ICacheTypeConfiguration<T> Config<T>();
 		/// <summary>
 		/// On Clear() clear found GroupKeys.
 		/// </summary>
