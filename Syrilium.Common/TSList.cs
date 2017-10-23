@@ -166,86 +166,60 @@ namespace Syrilium.Common
 		private void applySort(PropertyDescriptor property, ListSortDirection direction)
 		{
 			List<T> sortedList = new List<T>(items);
-			Comparer comparer = new TSList<T>.Comparer();
-			sortedList.Sort((item1, item2) =>
-			{
-				int rez;
-				if (item1 == null && item2 == null)
-				{
-					rez = 0;
-				}
-				else if (item1 == null)
-				{
-					rez = -1;
-				}
-				else if (item2 == null)
-				{
-					rez = 1;
-				}
-				else
-				{
-					rez = comparer.Compare(property.GetValue(item1), property.GetValue(item2));
-				}
-				return direction == ListSortDirection.Descending ? -rez : rez;
-			});
-
+			sortedList.Sort(GetComparison(property, direction));
 			items = sortedList.ToArray();
 		}
 
-		private class Comparer
+		private static Type comparableType = typeof(IComparable);
+
+		public Comparison<T> GetComparison(PropertyDescriptor propertyDescriptor, ListSortDirection direction)
 		{
-			private static Type comparableType;
-			private static Type comparableOfType;
+			Comparison<object> valueComparer = null;
 
-			private Dictionary<Type, KeyValuePair<Type, Type[]>> genericTypes = new Dictionary<Type, KeyValuePair<Type, Type[]>>();
-
-			static Comparer()
+			if (comparableType.IsAssignableFrom(propertyDescriptor.PropertyType))
 			{
-				comparableType = typeof(IComparable);
-				comparableOfType = typeof(IComparable<>);
+				valueComparer = (obj1, obj2) => ((IComparable)obj1).CompareTo(obj2);
 			}
-
-			public int Compare(object obj1, object obj2)
+			else
 			{
-				if (obj1 == null && obj2 == null)
-				{
-					return 0;
-				}
-				else if (obj1 == null)
-				{
-					return -1;
-				}
-				else if (obj2 == null)
-				{
-					return 1;
-				}
-
-				int rez = 0;
-				if (comparableType.IsInstanceOfType(obj1))
-				{
-					rez = ((IComparable)obj1).CompareTo(obj2);
-				}
+				var mi = propertyDescriptor.PropertyType.GetMethod("CompareTo", new[] { propertyDescriptor.PropertyType });
+				if (mi != null)
+					valueComparer = (obj1, obj2) => (int)mi.Invoke(obj1, new object[] { obj2 });
 				else
+					valueComparer = (obj1, obj2) => 0;
+			}
+
+			return (item1, item2) =>
+			{
+				int rez = NullCompare(item1, item2);
+				if (rez == -2)
 				{
-					Type obj1Type = obj1.GetType();
-					KeyValuePair<Type, Type[]> typeParameter;
-					if (!genericTypes.ContainsKey(obj1Type))
+					var obj1 = propertyDescriptor.GetValue(item1);
+					var obj2 = propertyDescriptor.GetValue(item2);
+					if ((rez = NullCompare(obj1, obj2)) == -2)
 					{
-						typeParameter = new KeyValuePair<Type, Type[]>(comparableOfType.MakeGenericType(obj1Type), new Type[] { obj1Type });
-						genericTypes.Add(obj1Type, typeParameter);
-					}
-					else
-					{
-						typeParameter = genericTypes[obj1Type];
-					}
-					if (typeParameter.Key.IsInstanceOfType(obj1))
-					{
-						rez = (int)obj1Type.GetMethod("CompareTo", typeParameter.Value).Invoke(obj1, new object[] { obj2 });
+						rez = valueComparer(obj1, obj2);
 					}
 				}
+				return direction == ListSortDirection.Descending ? -rez : rez;
+			};
+		}
 
-				return rez;
+		public static int NullCompare(object obj1, object obj2)
+		{
+			if (obj1 == null && obj2 == null)
+			{
+				return 0;
 			}
+			else if (obj1 == null)
+			{
+				return -1;
+			}
+			else if (obj2 == null)
+			{
+				return 1;
+			}
+			return -2;
 		}
 
 		private bool isSorted = false;
