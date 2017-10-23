@@ -50,6 +50,7 @@
     <Compile Include="ExtensionMethods.cs" />
     <Compile Include="IChecksumProvider.cs" />
     <Compile Include="ISortable.cs" />
+    <Compile Include="ITSList.cs" />
     <Compile Include="ObjectWrapper.cs" />
     <Compile Include="ReaderWriterLockWrapper.cs" />
     <Compile Include="Delegates.cs" />

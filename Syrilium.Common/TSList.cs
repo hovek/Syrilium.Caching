@@ -15,7 +15,7 @@ namespace Syrilium.Common
 	/// </summary>
 	/// <typeparam name="T"></typeparam>
 	[Serializable]
-	public class TSList<T> : IList<T>, ICollection<T>, IEnumerable<T>, IBindingList, IRaiseItemChangedEvents, ICloneable, ISortable
+	public class TSList<T> : ITSList<T>
 	{
 		[NonSerialized]
 		private PropertyDescriptor sortProperty;
@@ -1262,6 +1262,36 @@ namespace Syrilium.Common
 				list.Sort(index, count, comparer);
 				items = (T[])list.ToArray(typeof(T));
 			}
+		}
+
+		public string Filter { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+		public ListSortDescriptionCollection SortDescriptions => throw new NotImplementedException();
+
+		public bool SupportsAdvancedSorting
+		{
+			get
+			{
+				return false;
+			}
+		}
+
+		public bool SupportsFiltering
+		{
+			get
+			{
+				return false;
+			}
+		}
+
+		public void ApplySort(ListSortDescriptionCollection sorts)
+		{
+			throw new NotImplementedException();
+		}
+
+		public void RemoveFilter()
+		{
+			throw new NotImplementedException();
 		}
 	}
 }
