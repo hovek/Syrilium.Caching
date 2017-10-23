@@ -540,11 +540,18 @@ namespace Syrilium.Common
 			return list;
 		}
 
+		public ReaderWriterLockWrapper<List<T>> AddNewItems
+		{
+			get;
+			private set;
+		}
+
 		public object AddNew()
 		{
 			if (AllowNew)
 			{
-				object newItem = GetNew();
+				var newItem = GetNew();
+				AddNewItems.Write(l => l.Add(newItem));
 				Add(newItem);
 				return newItem;
 			}
@@ -558,6 +565,7 @@ namespace Syrilium.Common
 			AllowRemove = true;
 			IsReadOnly = false;
 			IsFixedSize = false;
+			AddNewItems = new ReaderWriterLockWrapper<List<T>>(new List<T>());
 		}
 
 		public TSList(ListChangedEventHandler listChangedEventHandler)
@@ -1265,7 +1273,28 @@ namespace Syrilium.Common
 
 		public void RemoveFilter()
 		{
-			throw new NotImplementedException();
+			filter = null;
+		}
+
+		private Predicate<T> filter;
+		public void ApplyFilter(Predicate<T> filter)
+		{
+			this.filter = filter;
+		}
+
+		public void CancelNew(int itemIndex)
+		{
+			AddNewItems.Read(lr =>
+			{
+				foreach (var i in lr.Value)
+					Remove(i);
+				lr.Write(lw => lw.Value.Clear());
+			});
+		}
+
+		public void EndNew(int itemIndex)
+		{
+			AddNewItems.Write(lw => lw.Clear());
 		}
 	}
 }

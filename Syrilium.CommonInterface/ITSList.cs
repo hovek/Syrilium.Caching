@@ -7,7 +7,8 @@ using System.Threading.Tasks;
 
 namespace Syrilium.CommonInterface
 {
-	public interface ITSList<T> : IList<T>, ICollection<T>, IEnumerable<T>, IBindingListView, IRaiseItemChangedEvents, ICloneable, ISortable
+	public interface ITSList<T> : IList<T>, IBindingListView, IRaiseItemChangedEvents, ICloneable, ISortable, ICancelAddNew
 	{
+		void ApplyFilter(Predicate<T> filter);
 	}
 }
