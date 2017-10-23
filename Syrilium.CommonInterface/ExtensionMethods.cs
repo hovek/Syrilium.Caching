@@ -174,7 +174,7 @@ namespace Syrilium.CommonInterface
 			return serializeXml;
 		}
 
-		public static IWrap<T> Wrap<T>(this T obj, ICollection<IWrap> wrapperCollection = null)
+		public static Wrap<T> Wrap<T>(this T obj, ICollection<IWrap> wrapperCollection = null)
 		{
 			var wrapper = new Wrap<T>(obj);
 			if (wrapperCollection != null) wrapperCollection.Add(wrapper);

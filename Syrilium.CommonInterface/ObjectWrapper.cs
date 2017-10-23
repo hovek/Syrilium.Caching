@@ -48,6 +48,11 @@ namespace Syrilium.CommonInterface
 			this.value = value;
 		}
 
+		public static implicit operator T(Wrap<T> w)  
+		{
+			return w.value;
+		}
+
 		public override int GetHashCode()
 		{
 			return value == null ? 0 : value.GetHashCode();
