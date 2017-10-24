@@ -191,3 +191,4 @@ ModelManifest.xml
 *.lock
 *.ide-shm
 *.ide-wal
+*.ide
