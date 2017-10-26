@@ -110,7 +110,7 @@ namespace Syrilium.Common
 				}
 				catch (Exception ex)
 				{
-					throw new System.Exception(ex.Message + " " + pathToOriginal);
+					throw new System.Exception(ex.Message + " " + pathToOriginal, ex);
 				}
 			}
 			try
