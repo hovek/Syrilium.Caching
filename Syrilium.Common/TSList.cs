@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Collections;
 using System.Reflection;
 using Syrilium.CommonInterface;
+using System.Linq;
 
 namespace Syrilium.Common
 {
@@ -78,11 +79,11 @@ namespace Syrilium.Common
 		//     System.ComponentModel.IBindingList.SupportsSearching is false.
 		public int Find(PropertyDescriptor property, object key)
 		{
-			return items.Read(lr =>
+			return items.Read(_ =>
 			{
-				for (int i = 0; i < lr.Value.Count; i++)
+				for (int i = 0; i < items.Value.Count; i++)
 				{
-					T item = lr.Value[i];
+					T item = items.Value[i];
 					if (property.GetValue(item).Equals(key))
 					{
 						return i;
@@ -160,7 +161,7 @@ namespace Syrilium.Common
 		//     System.ComponentModel.IBindingList.SupportsSorting is false.
 		public void ApplySort(PropertyDescriptor property, ListSortDirection direction)
 		{
-			items.Write(lw =>
+			items.Write(_ =>
 			{
 				sortProperty = property;
 				sortDirection = direction;
@@ -171,7 +172,10 @@ namespace Syrilium.Common
 
 		private void applySort(PropertyDescriptor property, ListSortDirection direction)
 		{
-			items.Value.Sort(GetComparison(property, direction));
+			var comparison = GetComparison(property, direction);
+			if (itemsView != null)
+				itemsView.Sort(comparison);
+			items.Value.Sort(comparison);
 		}
 
 		private static Type comparableType = typeof(IComparable);
@@ -253,7 +257,7 @@ namespace Syrilium.Common
 		//     System.ComponentModel.IBindingList.SupportsSorting is false.
 		public void RemoveSort()
 		{
-			items.Write(lw =>
+			items.Write(_ =>
 			{
 				sortProperty = null;
 				isSorted = false;
@@ -291,18 +295,26 @@ namespace Syrilium.Common
 			get { return sortProperty; }
 		}
 
-		private ReaderWriterLockWrapper<List<T>> _items;
-		private ReaderWriterLockWrapper<List<T>> items
+		private ReaderWriterLockWrapper<List<T>> items;
+		private List<T> _itemsView;
+
+		private List<T> itemsView
 		{
 			get
 			{
-				return _items;
+				return _itemsView;
 			}
 			set
 			{
-				_items = value;
+				_itemsView = value;
+				if (_itemsView == null)
+					currentItems = items.Value;
+				else
+					currentItems = _itemsView;
 			}
 		}
+
+		private List<T> currentItems;
 
 		public delegate T GetNewEventHandler();
 		private Valuent<GetNewEventHandler> _getNew;
@@ -352,29 +364,29 @@ namespace Syrilium.Common
 			return ListChanged == null;
 		}
 
-		private void onListChanged(ListChangedType listChangedType, bool removedItemHasValue, T removedItem, bool addedItemHasValue, T addedItem, int itemIndex)
+		private void onListChanged(ListChangedType listChangedType, bool removedItemHasValue, T removedItem, bool addedItemHasValue, T addedItem, int itemIndex, object extraInfo = null)
 		{
 			T[] removedItems = removedItemHasValue ? new T[] { removedItem } : new T[0];
 			T[] addedItems = addedItemHasValue ? new T[] { addedItem } : new T[0];
-			onListChanged(listChangedType, removedItems, addedItems, new int[] { itemIndex });
+			onListChanged(listChangedType, removedItems, addedItems, new int[] { itemIndex }, extraInfo);
 		}
 
-		private void onListChanged(ListChangedType listChangedType, T[] removedItems)
+		private void onListChanged(ListChangedType listChangedType, T[] removedItems, object extraInfo = null)
 		{
-			onListChanged(listChangedType, removedItems, new T[0], new int[0]);
+			onListChanged(listChangedType, removedItems, new T[0], new int[0], extraInfo);
 		}
 
-		private void onListChanged(ListChangedType listChangedType, T[] addedItems, int[] itemIndexes)
+		private void onListChanged(ListChangedType listChangedType, T[] addedItems, int[] itemIndexes, object extraInfo = null)
 		{
-			onListChanged(listChangedType, new T[0], addedItems, itemIndexes);
+			onListChanged(listChangedType, new T[0], addedItems, itemIndexes, extraInfo);
 		}
 
-		private void onListChanged(ListChangedType listChangedType, T[] removedItems, T[] addedItems)
+		private void onListChanged(ListChangedType listChangedType, T[] removedItems, T[] addedItems, object extraInfo = null)
 		{
-			onListChanged(listChangedType, removedItems, addedItems, new int[0]);
+			onListChanged(listChangedType, removedItems, addedItems, new int[0], extraInfo);
 		}
 
-		private void onListChanged(ListChangedType listChangedType, T[] removedItems, T[] addedItems, int[] itemIndexes)
+		private void onListChanged(ListChangedType listChangedType, T[] removedItems, T[] addedItems, int[] itemIndexes, object extraInfo = null)
 		{
 			foreach (T item in removedItems)
 			{
@@ -392,9 +404,12 @@ namespace Syrilium.Common
 				}
 			}
 
-			if (IsSorted && addedItems.Length > 0)
+			if (addedItems.Length > 0)
 			{
-				ApplySort(sortProperty, sortDirection);
+				if (filter != null)
+					filterAddedItems(addedItems);
+				if (IsSorted)
+					ApplySort(sortProperty, sortDirection);
 			}
 
 			if (ListChanged != null)
@@ -403,22 +418,25 @@ namespace Syrilium.Common
 				{
 					for (int i = 0; i < addedItems.Length; i++)
 					{
-						ListChanged(new ChangeInfo(this, addedItems[i], itemIndexes[i]), new ListChangedEventArgs(listChangedType, itemIndexes[i]));
+						ListChanged(new ChangeInfo(this, addedItems[i], itemIndexes[i], extraInfo), new ListChangedEventArgs(listChangedType, itemIndexes[i]));
 					}
 				}
 				else if (removedItems.Length > 0 || addedItems.Length > 0)
 				{
 					int itemIndex = itemIndexes.Length == 1 ? itemIndexes[0] : -1;
-					ListChanged(new ChangeInfo(this, removedItems, addedItems, itemIndexes), new ListChangedEventArgs(listChangedType, itemIndex));
+					ListChanged(new ChangeInfo(this, removedItems, addedItems, itemIndexes, extraInfo), new ListChangedEventArgs(listChangedType, itemIndex));
 				}
 			}
 		}
 
 		private void itemPropertyChanged(object sender, PropertyChangedEventArgs e)
 		{
-			if (IsSorted && sortProperty.Name == e.PropertyName)
+			if (sortProperty.Name == e.PropertyName)
 			{
-				ApplySort(sortProperty, sortDirection);
+				if (filter != null)
+					filterAddedItems(new[] { (T)sender });
+				if (IsSorted)
+					ApplySort(sortProperty, sortDirection);
 			}
 
 			if (ListChanged != null)
@@ -429,11 +447,23 @@ namespace Syrilium.Common
 			}
 		}
 
+		private void filterAddedItems(IEnumerable<T> addedItems)
+		{
+			items.Write(_ =>
+			{
+				foreach (var ai in addedItems)
+				{
+					if (!filter(ai))
+						itemsView.Remove(ai);
+				}
+			});
+		}
+
 		public void ReBindToNotifyPropertyChangedItems()
 		{
-			items.Read(lr =>
+			items.Read(_ =>
 			{
-				foreach (T item in lr.Value)
+				foreach (T item in items.Value)
 				{
 					if (item != null && item is INotifyPropertyChanged)
 					{
@@ -506,7 +536,7 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public List<T> GetRange(int index, int count)
 		{
-			return items.Read(lr => lr.Value.GetRange(index, count));
+			return items.Read(_ => currentItems.GetRange(index, count));
 		}
 
 		public void ForEach(Action<T> action)
@@ -532,10 +562,10 @@ namespace Syrilium.Common
 			return list;
 		}
 
-		public ReaderWriterLockWrapper<List<Tuple<T, int>>> AddNewItems
+		private ReaderWriterLockWrapper<List<T>> addNewItems
 		{
 			get;
-			private set;
+			set;
 		}
 
 		public object AddNew()
@@ -543,9 +573,15 @@ namespace Syrilium.Common
 			if (AllowNew)
 			{
 				var newItem = GetNew();
-				ReadWriteLock.Lock(new[] { AddNewItems.W, items.R }
-					, () => AddNewItems.Value.Add(new Tuple<T, int>(newItem, items.Value.Count)));
-				Add(newItem);
+				int itemIndex = -1;
+				ReadWriteLock.Lock(new[] { addNewItems.W, items.W }
+					, () =>
+					{
+						addNewItems.Value.Add(newItem);
+						itemIndex = add(newItem);
+					});
+				onItemAdded(newItem, itemIndex, "AddNewItem");
+
 				return newItem;
 			}
 
@@ -558,11 +594,12 @@ namespace Syrilium.Common
 			AllowRemove = true;
 			IsReadOnly = false;
 			IsFixedSize = false;
-			AddNewItems = new ReaderWriterLockWrapper<List<Tuple<T, int>>>(new List<Tuple<T, int>>());
+			addNewItems = new ReaderWriterLockWrapper<List<T>>(new List<T>());
 			if (capacity.HasValue)
 				items = new ReaderWriterLockWrapper<List<T>>(new List<T>(capacity.Value));
 			else
 				items = new ReaderWriterLockWrapper<List<T>>(new List<T>());
+			currentItems = items.Value;
 		}
 
 		public TSList(ListChangedEventHandler listChangedEventHandler)
@@ -598,14 +635,19 @@ namespace Syrilium.Common
 		{
 			get
 			{
-				return items.Read(lr => lr.Value[index]);
+				return items.Read(_ => currentItems[index]);
 			}
 			set
 			{
-				T oldItem = items.Write(lw =>
+				T oldItem = items.Write(_ =>
 				 {
-					 oldItem = lw[index];
-					 lw[index] = value;
+					 oldItem = currentItems[index];
+					 if (itemsView != null)
+					 {
+						 var itmIdx = items.Value.IndexOf(oldItem);
+						 items.Value[itmIdx] = value;
+					 }
+					 currentItems[index] = value;
 					 return oldItem;
 				 });
 				onListChanged(ListChangedType.ItemChanged, true, oldItem, true, value, index);
@@ -614,17 +656,29 @@ namespace Syrilium.Common
 
 		public void Sort()
 		{
-			items.Write(lw => items.Value.Sort());
+			items.Write(_ =>
+			{
+				items.Value.Sort();
+				itemsView?.Sort();
+			});
 		}
 
 		public void Sort(Comparison<T> comparison)
 		{
-			items.Write(lw => items.Value.Sort(comparison));
+			items.Write(_ =>
+			{
+				items.Value.Sort(comparison);
+				itemsView?.Sort(comparison);
+			});
 		}
 
 		public void Sort(IComparer<T> comparer)
 		{
-			items.Write(lw => items.Value.Sort(comparer));
+			items.Write(_ =>
+			{
+				items.Value.Sort(comparer);
+				itemsView?.Sort(comparer);
+			});
 		}
 
 		/// <summary>
@@ -634,7 +688,11 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public void Sort(int index, int count, IComparer<T> comparer)
 		{
-			items.Write(lw => items.Value.Sort(index, count, comparer));
+			items.Write(_ =>
+			{
+				items.Value.Sort(index, count, comparer);
+				itemsView?.Sort(index, count, comparer);
+			});
 		}
 
 		object System.Collections.IList.this[int index]
@@ -681,9 +739,21 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public void Insert(int index, T item)
 		{
-			items.Write(lw =>
+			items.Write(_ =>
 			{
-				lw.Insert(index, item);
+				currentItems.Insert(index, item);
+				if (itemsView != null)
+				{
+					int itemsIdx;
+					if (index < currentItems.Count)
+					{
+						var itm = currentItems[index];
+						itemsIdx = items.Value.IndexOf(itm);
+					}
+					else
+						itemsIdx = index;
+					items.Value.Insert(itemsIdx, item);
+				}
 			});
 			onListChanged(ListChangedType.ItemAdded, false, default(T), true, item, index);
 		}
@@ -695,7 +765,7 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public void RemoveAt(int index)
 		{
-			T removedItem = items.Write(lw => removeAt(index));
+			T removedItem = items.Write(_ => removeAt(index));
 			onListChanged(ListChangedType.ItemDeleted, true, removedItem, false, default(T), index);
 		}
 
@@ -708,7 +778,7 @@ namespace Syrilium.Common
 		{
 			int index = -1;
 			bool ret = false;
-			items.Write(lw => ret = remove(item, out index));
+			items.Write(_ => ret = remove(item, out index));
 			onListChanged(ListChangedType.ItemDeleted, true, item, false, default(T), index);
 
 			return ret;
@@ -716,13 +786,13 @@ namespace Syrilium.Common
 
 		public bool Contains(T item)
 		{
-			return items.Read(lr => lr.Value.Contains(item));
+			return items.Read(_ => items.Value.Contains(item));
 		}
 
 		public void Clear()
 		{
 			T[] oldItems = null;
-			items.Write(lw => oldItems = clear());
+			items.Write(_ => oldItems = clear());
 			onListChanged(ListChangedType.Reset, oldItems);
 		}
 
@@ -730,11 +800,11 @@ namespace Syrilium.Common
 		{
 			T[] removedItems = null;
 			T[] addedItems = null;
-			items.Write(lw =>
+			items.Write(_ =>
 			{
-				removedItems = lw.ToArray();
+				removedItems = items.Value.ToArray();
 				replace(collection);
-				addedItems = lw.ToArray();
+				addedItems = items.Value.ToArray();
 			});
 			onListChanged(ListChangedType.Reset, removedItems, addedItems);
 		}
@@ -743,29 +813,34 @@ namespace Syrilium.Common
 		{
 			items.Value.Clear();
 			items.Value.AddRange(collection);
+			if (itemsView != null)
+			{
+				itemsView.Clear();
+				itemsView.AddRange(collection);
+			}
 		}
 
 		public int Count
 		{
 			get
 			{
-				return items.Read(lr => lr.Value.Count);
+				return items.Read(_ => currentItems.Count);
 			}
 		}
 
 		public int IndexOf(T item)
 		{
-			return items.Read(lr => lr.Value.IndexOf(item));
+			return items.Read(_ => currentItems.IndexOf(item));
 		}
 
 		public T[] ToArray()
 		{
-			return items.Read(lr => lr.Value.ToArray());
+			return items.Read(_ => currentItems.ToArray());
 		}
 
 		public List<T> ToList()
 		{
-			return items.Read(lr => new List<T>(lr.Value));
+			return items.Read(_ => new List<T>(currentItems));
 		}
 
 		/// <summary>
@@ -775,15 +850,15 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public void CopyTo(T[] array, int arrayIndex)
 		{
-			items.Read(lr => lr.Value.CopyTo(array, arrayIndex));
+			items.Read(_ => currentItems.CopyTo(array, arrayIndex));
 		}
 
 		public void AddRange(IEnumerable<T> collection)
 		{
 			bool reset = false;
-			KeyValuePair<int[], T[]> addedItems = items.Write(lw =>
+			KeyValuePair<int[], T[]> addedItems = items.Write(_ =>
 			  {
-				  reset = lw.Count == 0;
+				  reset = currentItems.Count == 0;
 				  return addRange(collection);
 			  });
 			onListChanged(reset ? ListChangedType.Reset : ListChangedType.ItemAdded, addedItems.Value, addedItems.Key);
@@ -817,10 +892,15 @@ namespace Syrilium.Common
 
 		public int Add(object value)
 		{
-			int index = items.Write(lw => add((T)value));
-			onListChanged(ListChangedType.ItemAdded, false, default(T), true, (T)value, index);
+			int index = items.Write(_ => add((T)value));
+			onItemAdded(value, index);
 
 			return index;
+		}
+
+		private void onItemAdded(object value, int index, object extraInfo = null)
+		{
+			onListChanged(ListChangedType.ItemAdded, false, default(T), true, (T)value, index, extraInfo);
 		}
 
 		public bool Contains(object value)
@@ -855,7 +935,7 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public void CopyTo(Array array, int index)
 		{
-			items.Write(lw => lw.ToArray().CopyTo(array, index));
+			items.Write(_ => currentItems.ToArray().CopyTo(array, index));
 		}
 
 		public bool IsFixedSize
@@ -866,8 +946,10 @@ namespace Syrilium.Common
 
 		private T removeAt(int index)
 		{
-			T removedItem = items.Value[index];
-			items.Value.RemoveAt(index);
+			T removedItem = currentItems[index];
+			currentItems.RemoveAt(index);
+			if (itemsView != null)
+				items.Value.Remove(removedItem);
 			return removedItem;
 		}
 
@@ -875,23 +957,38 @@ namespace Syrilium.Common
 		{
 			var oldItems = items.Value.ToArray();
 			items.Value.Clear();
+			if (itemsView != null)
+				itemsView.Clear();
 			return oldItems;
 		}
 
 		private int add(T item)
 		{
-			int index = items.Value.Count;
-			items.Value.Insert(index, item);
+			int index = currentItems.Count;
+			currentItems.Add(item);
+			if (itemsView != null)
+				items.Value.Add(item);
 			return index;
 		}
 
 		private bool remove(T item, out int index)
 		{
-			for (int i = 0; i < items.Value.Count; i++)
+			var rez = remove(currentItems, item, out index);
+			if (itemsView != null)
 			{
-				if (object.Equals(item, items.Value[i]))
+				int idxDummy;
+				rez |= remove(items.Value, item, out idxDummy);
+			}
+			return rez;
+		}
+
+		private static bool remove(List<T> list, T item, out int index)
+		{
+			for (int i = 0; i < list.Count; i++)
+			{
+				if (object.Equals(item, list[i]))
 				{
-					items.Value.RemoveAt(i);
+					list.RemoveAt(i);
 					index = i;
 					return true;
 				}
@@ -903,15 +1000,19 @@ namespace Syrilium.Common
 
 		private KeyValuePair<int[], T[]> addRange(IEnumerable<T> collection)
 		{
-			var fromIndex = items.Value.Count;
-			items.Value.AddRange(collection);
+			var fromIndex = currentItems.Count;
+			currentItems.AddRange(collection);
+
+			if (itemsView != null)
+				items.Value.AddRange(collection);
+
 			var addedItemIndexes = new List<int>();
 			var addedItems = new List<T>();
 
-			for (int i = fromIndex; i < items.Value.Count; i++)
+			for (int i = fromIndex; i < currentItems.Count; i++)
 			{
 				addedItemIndexes.Add(i);
-				addedItems.Add(items.Value[i]);
+				addedItems.Add(currentItems[i]);
 			}
 
 			return new KeyValuePair<int[], T[]>(addedItemIndexes.ToArray(), addedItems.ToArray());
@@ -994,28 +1095,29 @@ namespace Syrilium.Common
 			public T[] ChangedItems;
 			public int[] ItemIndexes;
 			public string PropertyName;
+			public object ExtraInfo;
 
-			public ChangeInfo(TSList<T> itemList, T addedItem, int itemIndex)
-				: this(itemList, new T[0], new T[] { addedItem }, new int[] { itemIndex })
+			public ChangeInfo(TSList<T> itemList, T addedItem, int itemIndex, object extraInfo = null)
+				: this(itemList, new T[0], new T[] { addedItem }, new int[] { itemIndex }, extraInfo)
 			{
 			}
 
-			public ChangeInfo(TSList<T> itemList, T[] changedItems, int[] itemIndexes)
-				: this(itemList, new T[0], new T[0], changedItems, itemIndexes, "")
+			public ChangeInfo(TSList<T> itemList, T[] changedItems, int[] itemIndexes, object extraInfo = null)
+				: this(itemList, new T[0], new T[0], changedItems, itemIndexes, "", extraInfo)
 			{
 			}
 
-			public ChangeInfo(TSList<T> itemList, T[] changedItems, int[] itemIndexes, string PropertyName)
-				: this(itemList, new T[0], new T[0], changedItems, itemIndexes, PropertyName)
+			public ChangeInfo(TSList<T> itemList, T[] changedItems, int[] itemIndexes, string PropertyName, object extraInfo = null)
+				: this(itemList, new T[0], new T[0], changedItems, itemIndexes, PropertyName, extraInfo)
 			{
 			}
 
-			public ChangeInfo(TSList<T> itemList, T[] removedItems, T[] addedItems, int[] itemIndexes)
-				: this(itemList, removedItems, addedItems, new T[0], itemIndexes, "")
+			public ChangeInfo(TSList<T> itemList, T[] removedItems, T[] addedItems, int[] itemIndexes, object extraInfo = null)
+				: this(itemList, removedItems, addedItems, new T[0], itemIndexes, "", extraInfo)
 			{
 			}
 
-			public ChangeInfo(TSList<T> itemList, T[] removedItems, T[] addedItems, T[] changedItems, int[] itemIndexes, string propertyName)
+			public ChangeInfo(TSList<T> itemList, T[] removedItems, T[] addedItems, T[] changedItems, int[] itemIndexes, string propertyName, object extraInfo = null)
 			{
 				ItemList = itemList;
 				RemovedItems = removedItems;
@@ -1023,6 +1125,7 @@ namespace Syrilium.Common
 				ChangedItems = changedItems;
 				ItemIndexes = itemIndexes;
 				PropertyName = propertyName;
+				ExtraInfo = extraInfo;
 			}
 
 			public static implicit operator TSList<T>(ChangeInfo descriptor)
@@ -1033,17 +1136,38 @@ namespace Syrilium.Common
 
 		public object Clone()
 		{
-			return items.Read(lr => new TSList<T>(lr.Value));
+			TSList<T> tsl = null;
+			items.Read(_ =>
+			{
+				tsl = new TSList<T>(items.Value);
+				if (itemsView != null)
+					tsl.itemsView = new List<T>(itemsView);
+			});
+			tsl.filter = filter;
+			tsl.isSorted = isSorted;
+			tsl.sortDirection = sortDirection;
+			tsl.sortProperty = sortProperty;
+			tsl.SupportsSorting = SupportsSorting;
+			tsl.ReBindToNotifyPropertyChangedItems();
+
+			return tsl;
 		}
 
 		public void Sort(IComparer comparer)
 		{
-			items.Write(lw =>
+			items.Write(_ =>
 			{
-				ArrayList list = new ArrayList(lw);
+				ArrayList list = new ArrayList(currentItems);
 				list.Sort(comparer);
-				lw.Clear();
-				lw.AddRange((T[])list.ToArray(typeof(T)));
+				currentItems.Clear();
+				currentItems.AddRange((T[])list.ToArray(typeof(T)));
+				if (itemsView != null)
+				{
+					list = new ArrayList(items.Value);
+					list.Sort(comparer);
+					items.Value.Clear();
+					items.Value.AddRange((T[])list.ToArray(typeof(T)));
+				}
 			});
 		}
 
@@ -1054,12 +1178,19 @@ namespace Syrilium.Common
 		/// <param name="index"></param>
 		public void Sort(int index, int count, IComparer comparer)
 		{
-			items.Write(lw =>
+			items.Write(_ =>
 			{
-				ArrayList list = new ArrayList(lw);
+				ArrayList list = new ArrayList(currentItems);
 				list.Sort(index, count, comparer);
-				lw.Clear();
-				lw.AddRange((T[])list.ToArray(typeof(T)));
+				currentItems.Clear();
+				currentItems.AddRange((T[])list.ToArray(typeof(T)));
+				if (itemsView != null)
+				{
+					list = new ArrayList(items.Value);
+					list.Sort(index, count, comparer);
+					items.Value.Clear();
+					items.Value.AddRange((T[])list.ToArray(typeof(T)));
+				}
 			});
 		}
 
@@ -1090,46 +1221,83 @@ namespace Syrilium.Common
 
 		public void RemoveFilter()
 		{
-			filter = null;
+			items.Write(_ =>
+			{
+				filter = null;
+				itemsView = null;
+			});
+			onListChanged(ListChangedType.Reset, new T[0]);
 		}
 
 		private Predicate<T> filter;
 		public void ApplyFilter(Predicate<T> filter)
 		{
 			this.filter = filter;
+			applyFilter_Lock(filter);
+		}
+
+		public void applyFilter_Lock(Predicate<T> filter)
+		{
+			items.Write(_ => applyFilter(filter));
+			onListChanged(ListChangedType.Reset, new T[0]);
+		}
+
+		public void applyFilter(Predicate<T> filter)
+		{
+			itemsView = new List<T>();
+			foreach (var itm in items.Value)
+			{
+				if (filter(itm))
+					itemsView.Add(itm);
+			}
 		}
 
 		public void CancelNew(int itemIndex)
 		{
-			AddNewItems.Read(lr =>
+			var removedItems = new List<T>();
+			addNewItems.Read(addNewItems =>
 			{
-				items.Read(ir =>
+				items.Write(_ =>
 				{
-					var indexesToRemove = new List<int>();
-					foreach (var i in lr.Value)
+					foreach (var i in addNewItems.Value)
 					{
-						if (ir.Value[i.Item2].Equals(i.Item1))
-							indexesToRemove.Add(i.Item2);
-						else
-						{
-							var idx = ir.Value.IndexOf(i.Item1);
-							if (idx > -1)
-								indexesToRemove.Add(idx);
-						}
+						int index;
+						if (remove(i, out index))
+							removedItems.Add(i);
 					}
-
-					indexesToRemove.Sort();
-					indexesToRemove.Reverse();
-					ir.Write(iw => indexesToRemove.ForEach(i => iw.Value.RemoveAt(i)));
 				});
 
-				lr.Write(lw => lw.Value.Clear());
+				addNewItems.Write(_ => addNewItems.Value.Clear());
 			});
+
+			onListChanged(ListChangedType.ItemDeleted, removedItems.ToArray(), "AddNewItem");
 		}
+
+		public event EventHandler OnEndNew;
 
 		public void EndNew(int itemIndex)
 		{
-			AddNewItems.Write(lw => lw.Clear());
+			var item = addNewItems.Write(_ =>
+			{
+				var itm = addNewItems.Value.FirstOrDefault();
+				addNewItems.Value.Clear();
+				return itm;
+			});
+			OnEndNew?.Invoke(this, new TSItemEventArgs(item));
+		}
+
+		public class TSItemEventArgs : EventArgs
+		{
+			public T Item
+			{
+				get;
+				private set;
+			}
+
+			public TSItemEventArgs(T item)
+			{
+				Item = item;
+			}
 		}
 	}
 }
