@@ -9,6 +9,13 @@ namespace Syrilium.CommonInterface
 {
 	public interface ITSList<T> : IList<T>, IBindingListView, IRaiseItemChangedEvents, ICloneable, ISortable, ICancelAddNew
 	{
+		new T this[int index]
+		{
+			get;
+			set;
+		}
+
+		event EventHandler OnEndNew;
 		void ApplyFilter(Predicate<T> filter);
 	}
 }

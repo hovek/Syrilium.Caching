@@ -91,7 +91,7 @@ namespace Syrilium.Caching
 					{
 						if (methodsChanged)
 						{
-							methodsList = new List<CacheMethodConfiguration>(methods.Read(mr => mr.Value.Cast<CacheMethodConfiguration>()));
+							methodsList = new List<CacheMethodConfiguration>(methods.Read(mr => mr.Cast<CacheMethodConfiguration>()));
 							methodsChanged = false;
 						}
 					};
@@ -200,17 +200,17 @@ namespace Syrilium.Caching
 
 		private ICacheMethodConfiguration<T> onNewMethod(CacheMethodConfiguration<T> cmc)
 		{
-			return methods.Read(cr =>
+			return methods.ReadWrite(cr =>
 			{
 				var config = cr.Value.Find(c => c.MethodInfo == cmc.MethodInfo);
 				if (config != null)
 					return config;
 				return cr.Write(cw =>
 				{
-					config = cw.Value.Find(c => c.MethodInfo == cmc.MethodInfo);
+					config = cw.Find(c => c.MethodInfo == cmc.MethodInfo);
 					if (config != null)
 						return config;
-					cw.Value.Add(cmc);
+					cw.Add(cmc);
 					return cmc;
 				});
 			});

@@ -6,21 +6,13 @@ using System.Threading;
 
 namespace Syrilium.CommonInterface
 {
-	public interface IReadWriteLock
+	public class ReaderWriterLockWrapper
 	{
-		void AcquireReaderLock();
-		void ReleaseReaderLock();
-		void AcquireWriterLock();
-		void ReleaseWriterLock();
-	}
+		internal ReaderWriterLockSlim mainLock = new ReaderWriterLockSlim();
 
-	public class ReaderWriterLockWrapper<T> : IReadWriteLock
-	{
-		private ReaderWriterLock mainLock = new ReaderWriterLock();
-		private T value;
-		private UpgradeToWriterLockWrapper upgradeToWriter;
+		protected object value;
 
-		public T Value
+		public object Value
 		{
 			get
 			{
@@ -28,39 +20,126 @@ namespace Syrilium.CommonInterface
 			}
 		}
 
-		public int WriterSeqNum
+		//
+		// Summary:
+		//     Gets a value indicating whether the current thread holds a reader lock.
+		//
+		// Returns:
+		//     true if the current thread holds a reader lock; otherwise, false.
+		public bool IsReaderLockHeld
 		{
 			get
 			{
-				return mainLock.WriterSeqNum;
+				return mainLock.IsReadLockHeld;
+			}
+		}
+		//
+		// Summary:
+		//     Gets a value indicating whether the current thread holds the writer lock.
+		//
+		// Returns:
+		//     true if the current thread holds the writer lock; otherwise, false.
+		public bool IsWriterLockHeld
+		{
+			get
+			{
+				return mainLock.IsWriteLockHeld;
 			}
 		}
 
-		private KeyValuePair<LockType, IReadWriteLock>? write;
-		public KeyValuePair<LockType, IReadWriteLock> W
+		public bool IsUpgradeableReadLockHeld
+		{
+			get
+			{
+				return mainLock.IsUpgradeableReadLockHeld;
+			}
+		}
+
+		public void EnterUpgradeableReadLock()
+		{
+			mainLock.EnterUpgradeableReadLock();
+		}
+
+		public void ExitUpgradeableReadLock()
+		{
+			mainLock.ExitUpgradeableReadLock();
+		}
+
+		public void AcquireReaderLock()
+		{
+			mainLock.EnterReadLock();
+		}
+
+		public void ReleaseReaderLock()
+		{
+			mainLock.ExitReadLock();
+		}
+
+		public void AcquireWriterLock()
+		{
+			var hadReadWriteLock = mainLock.IsUpgradeableReadLockHeld;
+			mainLock.EnterWriteLock();
+			checkWriteAccess(hadReadWriteLock);
+		}
+
+		public void ReleaseWriterLock()
+		{
+			mainLock.ExitWriteLock();
+		}
+
+		protected void checkWriteAccess(bool hadReadWriteLock)
+		{
+			if (hadReadWriteLock)
+				throw new InvalidOperationException("There is already ReadWrite lock on this thread.");
+		}
+
+		internal virtual UpgradeToWriterLockWrapper GetUpgradeToWriterLockWrapper()
+		{
+			return new UpgradeToWriterLockWrapper(mainLock, value);
+		}
+	}
+
+	public class ReaderWriterLockWrapper<T> : ReaderWriterLockWrapper
+	{
+		new public T Value
+		{
+			get
+			{
+				return (T)value;
+			}
+		}
+
+		private KeyValuePair<LockType, ReaderWriterLockWrapper>? write;
+		public KeyValuePair<LockType, ReaderWriterLockWrapper> W
 		{
 			get
 			{
 				if (write == null)
-					write = new KeyValuePair<LockType, IReadWriteLock>(LockType.Write, this);
+					write = new KeyValuePair<LockType, ReaderWriterLockWrapper>(LockType.Write, this);
 				return write.Value;
 			}
 		}
 
-		private KeyValuePair<LockType, IReadWriteLock>? read;
-		public KeyValuePair<LockType, IReadWriteLock> R
+		private KeyValuePair<LockType, ReaderWriterLockWrapper>? read;
+		public KeyValuePair<LockType, ReaderWriterLockWrapper> R
 		{
 			get
 			{
 				if (read == null)
-					read = new KeyValuePair<LockType, IReadWriteLock>(LockType.Read, this);
+					read = new KeyValuePair<LockType, ReaderWriterLockWrapper>(LockType.Read, this);
 				return read.Value;
 			}
 		}
 
-		public bool AnyWritersSince(int seqNum)
+		private KeyValuePair<LockType, ReaderWriterLockWrapper>? readWrite;
+		public KeyValuePair<LockType, ReaderWriterLockWrapper> RW
 		{
-			return mainLock.AnyWritersSince(seqNum);
+			get
+			{
+				if (readWrite == null)
+					readWrite = new KeyValuePair<LockType, ReaderWriterLockWrapper>(LockType.ReadWrite, this);
+				return readWrite.Value;
+			}
 		}
 
 		public ReaderWriterLockWrapper()
@@ -77,58 +156,89 @@ namespace Syrilium.CommonInterface
 
 		private void init()
 		{
-			upgradeToWriter = new UpgradeToWriterLockWrapper(this);
 		}
 
-		public void Read(Action<UpgradeToWriterLockWrapper> action)
+		public void Read(Action<T> action)
 		{
-			mainLock.AcquireReaderLock(600000);
+			mainLock.EnterReadLock();
 			try
 			{
-				action(upgradeToWriter);
+				action(Value);
 			}
 			finally
 			{
-				mainLock.ReleaseReaderLock();
+				mainLock.ExitReadLock();
 			}
 		}
 
-		public TRes Read<TRes>(Func<UpgradeToWriterLockWrapper, TRes> func)
+		public TRes Read<TRes>(Func<T, TRes> func)
 		{
-			mainLock.AcquireReaderLock(600000);
+			mainLock.EnterReadLock();
 			try
 			{
-				return func(upgradeToWriter);
+				return func(Value);
 			}
 			finally
 			{
-				mainLock.ReleaseReaderLock();
+				mainLock.ExitReadLock();
+			}
+		}
+
+		public void ReadWrite(Action<UpgradeToWriterLockWrapper<T>> action)
+		{
+			mainLock.EnterUpgradeableReadLock();
+			try
+			{
+				using (var upgradeToWriter = (UpgradeToWriterLockWrapper<T>)GetUpgradeToWriterLockWrapper())
+					action(upgradeToWriter);
+			}
+			finally
+			{
+				mainLock.ExitUpgradeableReadLock();
+			}
+		}
+
+		public TRes ReadWrite<TRes>(Func<UpgradeToWriterLockWrapper<T>, TRes> func)
+		{
+			mainLock.EnterUpgradeableReadLock();
+			try
+			{
+				using (var upgradeToWriter = (UpgradeToWriterLockWrapper<T>)GetUpgradeToWriterLockWrapper())
+					return func(upgradeToWriter);
+			}
+			finally
+			{
+				mainLock.ExitUpgradeableReadLock();
 			}
 		}
 
 		public void Write(Action<T> action)
 		{
-			mainLock.AcquireWriterLock(600000);
+			var hadReadWriteLock = mainLock.IsUpgradeableReadLockHeld;
+			mainLock.EnterWriteLock();
 			try
 			{
-				action(value);
+				checkWriteAccess(hadReadWriteLock);
+				action(Value);
 			}
 			finally
 			{
-				mainLock.ReleaseWriterLock();
+				mainLock.ExitWriteLock();
 			}
 		}
 
 		public TRes Write<TRes>(Func<T, TRes> func)
 		{
-			mainLock.AcquireWriterLock(600000);
+			var hadReadWriteLock = mainLock.IsUpgradeableReadLockHeld;
+			mainLock.EnterWriteLock();
 			try
 			{
-				return func(value);
+				checkWriteAccess(hadReadWriteLock);
+				return func(Value);
 			}
 			finally
 			{
-				mainLock.ReleaseWriterLock();
+				mainLock.ExitWriteLock();
 			}
 		}
 
@@ -143,138 +253,143 @@ namespace Syrilium.CommonInterface
 
 		public TRes ConditionalReadWrite<TRes>(Func<T, bool> writeCondition, Func<T, TRes> read, Func<T, TRes> write)
 		{
-			return Read(v =>
+			return ReadWrite(v =>
 				{
 					if (!writeCondition(v.Value))
 						return read(v.Value);
 					else
 					{
-						return v.Write(vw =>
+						return v.Write(value =>
 							{
-								if (!vw.AnyWritersSince || writeCondition(v.Value))
-									return write(vw.Value);
+								if (writeCondition(v.Value))
+									return write(value);
 								else
-									return read(vw.Value);
+									return read(value);
 							});
 					}
 				});
 		}
 
-		public class UpgradeToWriterLockWrapper
+		internal override UpgradeToWriterLockWrapper GetUpgradeToWriterLockWrapper()
 		{
-			private ReaderWriterLockWrapper<T> readerWriterLock;
+			return new UpgradeToWriterLockWrapper<T>(mainLock, Value);
+		}
+	}
 
-			public T Value
+	public class UpgradeToWriterLockWrapper<T> : UpgradeToWriterLockWrapper
+	{
+		new public T Value
+		{
+			get
 			{
-				get
-				{
-					return readerWriterLock.value;
-				}
-			}
-
-			public UpgradeToWriterLockWrapper(ReaderWriterLockWrapper<T> readerWriterLock)
-			{
-				this.readerWriterLock = readerWriterLock;
-			}
-
-			public void Write(Action<WriterLockWrapper> action)
-			{
-				var wlw = new WriterLockWrapper(readerWriterLock);
-				var lockCookie = readerWriterLock.mainLock.UpgradeToWriterLock(600000);
-				try
-				{
-					action(wlw);
-				}
-				finally
-				{
-					readerWriterLock.mainLock.DowngradeFromWriterLock(ref lockCookie);
-				}
-			}
-
-			public TRes Write<TRes>(Func<WriterLockWrapper, TRes> func)
-			{
-				var wlw = new WriterLockWrapper(readerWriterLock);
-				var lockCookie = readerWriterLock.mainLock.UpgradeToWriterLock(600000);
-				try
-				{
-					return func(wlw);
-				}
-				finally
-				{
-					readerWriterLock.mainLock.DowngradeFromWriterLock(ref lockCookie);
-				}
+				return (T)value;
 			}
 		}
 
-		public class WriterLockWrapper
+		public UpgradeToWriterLockWrapper(ReaderWriterLockSlim mainLock, T value) :
+			base(mainLock, value)
 		{
-			private ReaderWriterLockWrapper<T> readerWriterLock;
-			private int writerSeqNum;
+		}
 
-			public T Value
+		public void Write(Action<T> action)
+		{
+			base.Write(action);
+		}
+
+		public TRes Write<TRes>(Func<T, TRes> func)
+		{
+			return base.Write(func);
+		}
+	}
+
+	public class UpgradeToWriterLockWrapper : IDisposable
+	{
+		protected ReaderWriterLockSlim mainLock;
+		protected object value;
+
+		public object Value
+		{
+			get
 			{
-				get
-				{
-					return readerWriterLock.value;
-				}
+				return value;
 			}
+		}
 
-			public bool AnyWritersSince
+		public UpgradeToWriterLockWrapper(ReaderWriterLockSlim mainLock, object value)
+		{
+			this.mainLock = mainLock;
+			this.value = value;
+		}
+
+		public void Write<T>(Action<T> action)
+		{
+			mainLock.EnterWriteLock();
+			try
 			{
-				get
-				{
-					return readerWriterLock.mainLock.AnyWritersSince(writerSeqNum);
-				}
+				action((T)Value);
 			}
-
-			public WriterLockWrapper(ReaderWriterLockWrapper<T> readerWriterLock)
+			finally
 			{
-				this.readerWriterLock = readerWriterLock;
-				writerSeqNum = readerWriterLock.mainLock.WriterSeqNum;
+				mainLock.ExitWriteLock();
 			}
 		}
 
-		public void AcquireReaderLock()
+		public TRes Write<TRes, T>(Func<T, TRes> func)
 		{
-			mainLock.AcquireReaderLock(600000);
+			mainLock.EnterWriteLock();
+			try
+			{
+				return func((T)Value);
+			}
+			finally
+			{
+				mainLock.ExitWriteLock();
+			}
 		}
 
-		public void ReleaseReaderLock()
+		public void Dispose()
 		{
-			mainLock.ReleaseReaderLock();
+			IsDisposed = true;
+			value = null;
+			mainLock = null;
 		}
 
-		public void AcquireWriterLock()
-		{
-			mainLock.AcquireWriterLock(600000);
-		}
-
-		public void ReleaseWriterLock()
-		{
-			mainLock.ReleaseWriterLock();
-		}
+		public bool IsDisposed { get; private set; }
 	}
 
 	public enum LockType
 	{
 		Read,
-		Write
+		Write,
+		ReadWrite,
 	}
 
 	public static class ReadWriteLock
 	{
-		public static void Lock(IEnumerable<KeyValuePair<LockType, IReadWriteLock>> readWriteLocks, Action action)
+		public static void Lock(IEnumerable<KeyValuePair<LockType, ReaderWriterLockWrapper>> readWriteLocks, Action<UpgradeToWriteLock> action)
 		{
 			try
 			{
+				var locks = new List<ReaderWriterLockWrapper>();
 				foreach (var rwLock in readWriteLocks)
 				{
 					if (rwLock.Key == LockType.Write)
 						rwLock.Value.AcquireWriterLock();
-					else
+					else if (rwLock.Key == LockType.Read)
 						rwLock.Value.AcquireReaderLock();
+					else
+					{
+						locks.Add(rwLock.Value);
+						rwLock.Value.EnterUpgradeableReadLock();
+					}
 				}
-				action();
+				if (locks.Count > 0)
+				{
+					using (var upgradeToWriteLock = new UpgradeToWriteLock(locks))
+						action(upgradeToWriteLock);
+				}
+				else
+					action(null);
 			}
 			finally
 			{
@@ -282,10 +397,51 @@ namespace Syrilium.CommonInterface
 				{
 					if (rwLock.Key == LockType.Write)
 						rwLock.Value.ReleaseWriterLock();
-					else
+					else if (rwLock.Key == LockType.Read)
 						rwLock.Value.ReleaseReaderLock();
+					else
+						rwLock.Value.ExitUpgradeableReadLock();
 				}
 			}
 		}
+	}
+
+	public class UpgradeToWriteLock : IDisposable
+	{
+		private Dictionary<ReaderWriterLockWrapper, UpgradeToWriterLockWrapper> upgradeToWriterLockWrapper = new Dictionary<ReaderWriterLockWrapper, UpgradeToWriterLockWrapper>();
+
+		public UpgradeToWriteLock(IEnumerable<ReaderWriterLockWrapper> readWriteLocks)
+		{
+			foreach (var lck in readWriteLocks)
+				upgradeToWriterLockWrapper.Add(lck, lck.GetUpgradeToWriterLockWrapper());
+		}
+
+		public UpgradeToWriterLockWrapper this[ReaderWriterLockWrapper key]
+		{
+			get
+			{
+				return upgradeToWriterLockWrapper[key];
+			}
+		}
+
+		public void Write<T>(ReaderWriterLockWrapper<T> v, Action<T> action)
+		{
+			upgradeToWriterLockWrapper[v].Write(action);
+		}
+
+		public TRes Write<T, TRes>(ReaderWriterLockWrapper<T> v, Func<T, TRes> func)
+		{
+			return upgradeToWriterLockWrapper[v].Write(func);
+		}
+
+		public void Dispose()
+		{
+			IsDisposed = true;
+			foreach (var l in upgradeToWriterLockWrapper)
+				l.Value.Dispose();
+			upgradeToWriterLockWrapper = null;
+		}
+
+		public bool IsDisposed { get; private set; }
 	}
 }
