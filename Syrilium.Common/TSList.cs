@@ -188,34 +188,36 @@ namespace Syrilium.Common
 		{
 			Action<UpgradeToWriterLockWrapper<List<T>>> action = items =>
 			{
-				List<T> oldItems = null;
+				//List<T> oldItems = null;
 				items.Write(_ =>
 				{
 					writeBeforeSort?.Invoke();
-					oldItems = new List<T>(currentItems);
+					//oldItems = new List<T>(currentItems);
 					sort(currentItems);
 					if (itemsView != null)
 						sort(items.Value);
 				});
 
-				var movedItems = new List<T>();
-				var newIndexes = new List<int>();
-				var oldIndexes = new List<int>();
+				onListChanged(ListChangedType.Reset, addedItemHasValue: false);
 
-				for (int i = 0; i < oldItems.Count; i++)
-				{
-					var item = oldItems[i];
-					var newIndex = currentItems.IndexOf(item);
-					if (newIndex != i)
-					{
-						movedItems.Add(item);
-						oldIndexes.Add(i);
-						newIndexes.Add(newIndex);
-					}
-				}
+				//var movedItems = new List<T>();
+				//var newIndexes = new List<int>();
+				//var oldIndexes = new List<int>();
 
-				if (movedItems.Count > 0)
-					onListChanged(ListChangedType.ItemMoved, movedItems.ToArray(), newIndexes: newIndexes.ToArray(), oldIndexes: oldIndexes.ToArray());
+				//for (int i = 0; i < oldItems.Count; i++)
+				//{
+				//	var item = oldItems[i];
+				//	var newIndex = currentItems.IndexOf(item);
+				//	if (newIndex != i)
+				//	{
+				//		movedItems.Add(item);
+				//		oldIndexes.Add(i);
+				//		newIndexes.Add(newIndex);
+				//	}
+				//}
+
+				//if (movedItems.Count > 0)
+				//	onListChanged(ListChangedType.ItemMoved, movedItems.ToArray(), newIndexes: newIndexes.ToArray(), oldIndexes: oldIndexes.ToArray());
 			};
 
 			if (upgradeToWriterLockWrapper == null)
@@ -308,6 +310,8 @@ namespace Syrilium.Common
 				sortProperty = null;
 				isSorted = false;
 			});
+
+			onListChanged(ListChangedType.Reset, addedItemHasValue: false);
 		}
 
 		//
@@ -400,6 +404,12 @@ namespace Syrilium.Common
 		private T getNewT()
 		{
 			return (T)constructorOfT.Value.Invoke(null);
+		}
+
+		public TSList<T> SetAddNew<TNew>()
+		{
+			_constructorOfT = new Valuent<ConstructorInfo>(typeof(TNew).GetConstructor(Type.EmptyTypes));
+			return this;
 		}
 
 		[field: NonSerialized]
@@ -678,10 +688,15 @@ namespace Syrilium.Common
 				ReadWriteLock.Lock(new[] { addNewItems.RW, items.RW }
 					, wl =>
 					{
-						wl.Write(addNewItems, _ => addNewItems.Value.Add(newItem));
+						wl.Write(addNewItems,
+						_ =>
+						{
+							addNewItems.Value.Clear();
+							addNewItems.Value.Add(newItem);
+						});
 						var itemIndex = wl.Write(items, _ => add(newItem));
 
-						onItemAdded(newItem, itemIndex, "AddNewItem", (UpgradeToWriterLockWrapper<List<T>>)wl[items]);
+						onItemAdded(newItem, itemIndex, "AddNewItem", (UpgradeToWriterLockWrapper<List<T>>)wl[items], sortAllowed: false);
 					});
 
 				return newItem;
@@ -1383,11 +1398,11 @@ namespace Syrilium.Common
 		public void EndNew(int itemIndex)
 		{
 			T item = default(T);
-			if (!addNewItems.ReadWrite(addNewItems =>
+			if (!addNewItems.Read(_ =>
 			 {
 				 if (addNewItems.Value.Count == 0) return false;
 				 item = addNewItems.Value.FirstOrDefault();
-				 addNewItems.Write(_ => addNewItems.Value.Clear());
+				 //addNewItems.Write(_ => addNewItems.Value.Clear());
 				 return true;
 			 }))
 				return;
