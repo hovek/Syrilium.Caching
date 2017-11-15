@@ -37,7 +37,14 @@
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="EntityFramework, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089, processorArchitecture=MSIL">
+      <HintPath>..\packages\EntityFramework.6.2.0\lib\net45\EntityFramework.dll</HintPath>
+    </Reference>
+    <Reference Include="EntityFramework.SqlServer, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089, processorArchitecture=MSIL">
+      <HintPath>..\packages\EntityFramework.6.2.0\lib\net45\EntityFramework.SqlServer.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
+    <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Xml.Linq" />
@@ -49,6 +56,7 @@
   <ItemGroup>
     <Compile Include="ExtensionMethods.cs" />
     <Compile Include="IChecksumProvider.cs" />
+    <Compile Include="IDbContextRollback.cs" />
     <Compile Include="ISortable.cs" />
     <Compile Include="ITSList.cs" />
     <Compile Include="ObjectWrapper.cs" />
@@ -68,6 +76,10 @@
     <Compile Include="ObservableCollectionReplication.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="IReflectionHelper.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+    <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>

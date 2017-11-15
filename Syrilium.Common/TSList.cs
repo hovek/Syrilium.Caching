@@ -19,8 +19,8 @@ namespace Syrilium.Common
 	public class TSList<T> : ITSList<T>
 	{
 		[NonSerialized]
-		private PropertyDescriptor sortProperty;
-		private ListSortDirection sortDirection;
+		protected PropertyDescriptor sortProperty;
+		protected ListSortDirection sortDirection;
 
 		//
 		// Summary:
@@ -143,7 +143,7 @@ namespace Syrilium.Common
 			applySort(propertyName, direction);
 		}
 
-		private void applySort(string propertyName, ListSortDirection direction, UpgradeToWriterLockWrapper<List<T>> upgradeToWriterLockWrapper = null)
+		protected void applySort(string propertyName, ListSortDirection direction, UpgradeToWriterLockWrapper<List<T>> upgradeToWriterLockWrapper = null)
 		{
 			PropertyDescriptor propertyDescriptor = properties.Find(propertyName, false);
 			applySort(propertyDescriptor, direction, upgradeToWriterLockWrapper);
@@ -438,7 +438,7 @@ namespace Syrilium.Common
 			if (newIndexes == null) newIndexes = new int[0];
 			if (oldIndexes == null) oldIndexes = new int[0];
 
-			if (listChangedType != ListChangedType.ItemMoved)
+			if (listChangedType != ListChangedType.ItemMoved && extraInfo.ToStringEx() != "ByFilter")
 			{
 				foreach (T item in removedItems)
 				{
@@ -457,6 +457,8 @@ namespace Syrilium.Common
 				}
 			}
 
+			var changedItems = new T[0];
+
 			if (ListChanged != null)
 			{
 				if (listChangedType == ListChangedType.ItemAdded)
@@ -466,7 +468,7 @@ namespace Syrilium.Common
 						var items = new[] { addedItems[i] };
 						var itemIndex = newIndexes[i];
 						var indexes = new[] { itemIndex };
-						ListChanged(new ChangeInfo(this, listChangedType, addedItems: items, newIndexes: indexes, extraInfo: extraInfo)
+						ListChanged(new ChangeInfo(this, listChangedType, addedItems: items, removedItems: removedItems, changedItems: changedItems, newIndexes: indexes, extraInfo: extraInfo)
 							, new ListChangedEventArgs(listChangedType, itemIndex));
 					}
 				}
@@ -477,7 +479,7 @@ namespace Syrilium.Common
 						var items = new[] { removedItems[i] };
 						var itemIndex = oldIndexes[i];
 						var indexes = new[] { itemIndex };
-						ListChanged(new ChangeInfo(this, listChangedType, removedItems: items, oldIndexes: indexes, extraInfo: extraInfo)
+						ListChanged(new ChangeInfo(this, listChangedType, addedItems: addedItems, removedItems: items, changedItems: changedItems, oldIndexes: indexes, extraInfo: extraInfo)
 							, new ListChangedEventArgs(listChangedType, itemIndex));
 					}
 				}
@@ -490,7 +492,7 @@ namespace Syrilium.Common
 						var itemIndexOld = oldIndexes[i];
 						var indexesNew = new[] { itemIndexNew };
 						var indexesOld = new[] { itemIndexOld };
-						ListChanged(new ChangeInfo(this, listChangedType, removedItems: items, newIndexes: indexesNew, oldIndexes: indexesOld, extraInfo: extraInfo)
+						ListChanged(new ChangeInfo(this, listChangedType, addedItems: addedItems, removedItems: items, changedItems: changedItems, newIndexes: indexesNew, oldIndexes: indexesOld, extraInfo: extraInfo)
 							, new ListChangedEventArgs(listChangedType, itemIndexNew, itemIndexOld));
 					}
 				}
@@ -501,13 +503,13 @@ namespace Syrilium.Common
 						var items = new[] { addedItems[i] };
 						var itemIndex = oldIndexes[i];
 						var indexes = new[] { itemIndex };
-						ListChanged(new ChangeInfo(this, listChangedType, changedItems: items, oldIndexes: indexes, extraInfo: extraInfo)
+						ListChanged(new ChangeInfo(this, listChangedType, addedItems: addedItems, removedItems: removedItems, changedItems: items, oldIndexes: indexes, extraInfo: extraInfo)
 							, new ListChangedEventArgs(listChangedType, itemIndex));
 					}
 				}
 				else
 				{
-					ListChanged(new ChangeInfo(this, listChangedType, removedItems, addedItems, newIndexes: newIndexes, oldIndexes: oldIndexes, extraInfo: extraInfo)
+					ListChanged(new ChangeInfo(this, listChangedType, removedItems, addedItems, changedItems: changedItems, newIndexes: newIndexes, oldIndexes: oldIndexes, extraInfo: extraInfo)
 						, new ListChangedEventArgs(listChangedType, -1));
 				}
 			}
@@ -515,7 +517,7 @@ namespace Syrilium.Common
 			if (addedItems.Length > 0)
 			{
 				if (filter != null && filteringAllowed)
-					filterAddedItems(addedItems, upgradeToWriterLockWrapper);
+					applyFilter(filter, new List<T>(addedItems), upgradeToWriterLockWrapper);
 				if (IsSorted && sortAllowed)
 					applySort(sortProperty, sortDirection, upgradeToWriterLockWrapper);
 			}
@@ -535,41 +537,17 @@ namespace Syrilium.Common
 				}
 
 				int index = IndexOf(sender);
-				ListChanged(new ChangeInfo(this, ListChangedType.ItemChanged, changedItems: new T[] { (T)sender }, oldIndexes: new int[] { index }, propertyName: e.PropertyName)
+				ListChanged(new ChangeInfo(this, ListChangedType.ItemChanged, addedItems: new T[0], removedItems: new T[0], changedItems: new T[] { (T)sender }, oldIndexes: new int[] { index }, propertyName: e.PropertyName)
 					, new ListChangedEventArgs(ListChangedType.ItemChanged, index, propertyDescriptor));
 			}
 
-			if (sortProperty.Name == e.PropertyName)
-			{
-				if (filter != null)
-					filterAddedItems(new[] { (T)sender });
-				if (IsSorted)
-					applySort(sortProperty, sortDirection);
-			}
+			if (filter != null)
+				applyFilter(filter, new List<T> { (T)sender });
+			if (IsSorted && sortProperty.Name == e.PropertyName)
+				applySort(sortProperty, sortDirection);
 		}
 
 		private Dictionary<string, PropertyDescriptor> itemProperties = new Dictionary<string, PropertyDescriptor>();
-
-		private void filterAddedItems(IEnumerable<T> addedItems, UpgradeToWriterLockWrapper<List<T>> upgradeToWriterLockWrapper = null)
-		{
-			Action<UpgradeToWriterLockWrapper<List<T>>> action = items =>
-			{
-				foreach (var ai in addedItems)
-				{
-					if (!filter(ai))
-					{
-						int index = -1;
-						if (items.Write(_ => remove(itemsView, ai, out index)))
-							onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: ai, oldIndex: index);
-					}
-				}
-			};
-
-			if (upgradeToWriterLockWrapper == null)
-				items.ReadWrite(action);
-			else
-				action(upgradeToWriterLockWrapper);
-		}
 
 		public void ReBindToNotifyPropertyChangedItems()
 		{
@@ -674,7 +652,7 @@ namespace Syrilium.Common
 			return list;
 		}
 
-		private ReaderWriterLockWrapper<List<T>> addNewItems
+		protected ReaderWriterLockWrapper<List<T>> addNewItems
 		{
 			get;
 			set;
@@ -696,7 +674,7 @@ namespace Syrilium.Common
 						});
 						var itemIndex = wl.Write(items, _ => add(newItem));
 
-						onItemAdded(newItem, itemIndex, "AddNewItem", (UpgradeToWriterLockWrapper<List<T>>)wl[items], sortAllowed: false);
+						onItemAdded(newItem, itemIndex, "AddNewItem", (UpgradeToWriterLockWrapper<List<T>>)wl[items]);
 					});
 
 				return newItem;
@@ -1316,7 +1294,7 @@ namespace Syrilium.Common
 					{
 						int index = itemsView.Count < i ? itemsView.Count : i;
 						items.Write(_ => itemsView.Insert(index, item));
-						onListChanged(ListChangedType.ItemAdded, addedItemHasValue: true, addedItem: item, newIndex: index, filteringAllowed: false, upgradeToWriterLockWrapper: items, sortAllowed: false);
+						onListChanged(ListChangedType.ItemAdded, addedItemHasValue: true, addedItem: item, newIndex: index, filteringAllowed: false, upgradeToWriterLockWrapper: items, sortAllowed: false, extraInfo: "ByFilter");
 					}
 				}
 
@@ -1341,40 +1319,53 @@ namespace Syrilium.Common
 						itemsView = new List<T>(items.Value);
 				});
 
-				for (int i = 0; i < items.Value.Count; i++)
+				applyFilter(filter, items.Value, items);
+			});
+		}
+
+		private void applyFilter(Predicate<T> filter, List<T> list, UpgradeToWriterLockWrapper<List<T>> upgradeToWriterLockWrapper = null)
+		{
+			Action<UpgradeToWriterLockWrapper<List<T>>> action = wu =>
+			{
+				for (int i = 0; i < list.Count; i++)
 				{
 					bool added = false;
-					T item = items.Value[i];
+					T item = list[i];
 					int index = -1;
 
-					if (!items.Write(_ =>
-					 {
-						 if (filter(item))
-						 {
-							 if (!itemsView.Contains(item))
-							 {
-								 index = itemsView.Count < i ? itemsView.Count : i;
-								 itemsView.Insert(index, item);
-								 added = true;
-								 return true;
-							 }
-						 }
-						 else if ((index = itemsView.IndexOf(item)) != -1)
-						 {
-							 itemsView.RemoveAt(index);
-							 return true;
-						 }
+					if (!wu.Write(_ =>
+					{
+						if (filter(item))
+						{
+							if (!itemsView.Contains(item))
+							{
+								index = itemsView.Count < i ? itemsView.Count : i;
+								itemsView.Insert(index, item);
+								added = true;
+								return true;
+							}
+						}
+						else if ((index = itemsView.IndexOf(item)) != -1)
+						{
+							itemsView.RemoveAt(index);
+							return true;
+						}
 
-						 return false;
-					 }))
+						return false;
+					}))
 						continue;
 
 					if (!added)
-						onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: item, oldIndex: index, upgradeToWriterLockWrapper: items);
+						onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: item, oldIndex: index, upgradeToWriterLockWrapper: wu, extraInfo: "ByFilter");
 					else
-						onListChanged(ListChangedType.ItemAdded, addedItemHasValue: true, addedItem: item, newIndex: index, filteringAllowed: false, upgradeToWriterLockWrapper: items, sortAllowed: false);
+						onListChanged(ListChangedType.ItemAdded, addedItemHasValue: true, addedItem: item, newIndex: index, filteringAllowed: false, upgradeToWriterLockWrapper: wu, sortAllowed: false, extraInfo: "ByFilter");
 				}
-			});
+			};
+
+			if (upgradeToWriterLockWrapper == null)
+				items.ReadWrite(action);
+			else
+				action(upgradeToWriterLockWrapper);
 		}
 
 		public void CancelNew(int itemIndex)
