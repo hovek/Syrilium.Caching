@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data.Entity;
+using System.Data.Entity.Infrastructure;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -89,12 +90,31 @@ namespace Syrilium.Common
 
 		public void Rollback()
 		{
-			((IDbContextRollback)DbContext).Rollback();
+			var changedEntries = DbContext.ChangeTracker.Entries()
+					.Where(x => x.State == EntityState.Added || x.State == EntityState.Deleted || x.State == EntityState.Modified);
+			foreach (var e in changedEntries)
+				Rollback(e);
 		}
 
-		public void Rollback(T entity)
+		public void Rollback(object entity)
 		{
-			((IDbContextRollback)DbContext).Rollback((object)entity);
+			Rollback(DbContext.Entry(entity));
+		}
+
+		public void Rollback(DbEntityEntry entry)
+		{
+			switch (entry.State)
+			{
+				case EntityState.Added:
+					Remove(entry.Entity);
+					break;
+				case EntityState.Deleted:
+					Add(entry.Entity);
+					break;
+				case EntityState.Modified:
+					((IDbContextRollback)DbContext).Rollback(entry.Entity);
+					break;
+			}
 		}
 	}
 }

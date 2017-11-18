@@ -10,7 +10,6 @@ namespace Syrilium.CommonInterface
 	public interface IDbContextRollback
 	{
 		void Rollback(object entity);
-		void Rollback<TEntity>(TEntity entity) where TEntity : class;
 		void Rollback();
 		void Rollback(DbEntityEntry entry);
 	}

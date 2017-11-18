@@ -13,7 +13,7 @@ namespace Syrilium.Common
 	{
 		public void SetWithNotify<T>(T val, ref T field, [CallerMemberName] string prop = "")
 		{
-			if ((field == null && val != null) || !field.Equals(val))
+			if ((field != null && !field.Equals(val)) || (field == null && val != null))
 			{
 				PropertyChanging?.Invoke(this, new PropertyChangingEventArgs(prop));
 				field = val;
