@@ -854,7 +854,7 @@ namespace Syrilium.Common
 			items.ReadWrite(items =>
 			{
 				T removedItem = items.Write(_ => removeAt(index));
-				onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: removedItem, oldIndex: index);
+				onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: removedItem, oldIndex: index, upgradeToWriterLockWrapper: items);
 			});
 		}
 
@@ -870,7 +870,7 @@ namespace Syrilium.Common
 				int index = -1;
 				var ret = items.Write(_ => remove(item, out index));
 
-				onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: item, oldIndex: index);
+				onListChanged(ListChangedType.ItemDeleted, removedItemHasValue: true, removedItem: item, oldIndex: index, upgradeToWriterLockWrapper: items);
 				return ret;
 			});
 		}
@@ -886,7 +886,7 @@ namespace Syrilium.Common
 			{
 				T[] oldItems = null;
 				items.Write(_ => oldItems = clear());
-				onListChanged(ListChangedType.Reset, oldItems);
+				onListChanged(ListChangedType.Reset, oldItems, upgradeToWriterLockWrapper: items);
 			});
 		}
 
@@ -902,7 +902,7 @@ namespace Syrilium.Common
 					replace(collection);
 					addedItems = items.Value.ToArray();
 				});
-				onListChanged(ListChangedType.Reset, removedItems, addedItems);
+				onListChanged(ListChangedType.Reset, removedItems, addedItems, upgradeToWriterLockWrapper: items);
 			});
 		}
 

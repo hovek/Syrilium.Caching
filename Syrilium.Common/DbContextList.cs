@@ -100,7 +100,7 @@ namespace Syrilium.Common
 		public void Rollback()
 		{
 			var changedEntries = DbContext.ChangeTracker.Entries()
-					.Where(x => x.State == EntityState.Added || x.State == EntityState.Deleted || x.State == EntityState.Modified);
+					.Where(x => x.State == EntityState.Added || x.State == EntityState.Deleted || x.State == EntityState.Modified).ToList();
 			foreach (var e in changedEntries)
 				Rollback(e);
 		}
