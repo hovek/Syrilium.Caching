@@ -14,11 +14,13 @@ namespace Syrilium.Common
 	{
 		public DbContext DbContext { get; set; }
 		public DbSet DbSet { get; set; }
+		public bool ReflectChangesToDbSet = true;
+		public Func<ListChangedType, T, object> DbSetObjectNeeded;
 
 		public DbContextList(int? capacity = null, DbContext dbContext = null)
 			: base(capacity)
 		{
-			this.DbContext = dbContext;
+			SetDbContext(dbContext);
 			init();
 		}
 
@@ -30,18 +32,12 @@ namespace Syrilium.Common
 		public DbContextList(IEnumerable<T> collection, ListChangedEventHandler listChangedEventHandler, DbContext dbContext = null)
 			: base(collection, listChangedEventHandler)
 		{
-			this.DbContext = dbContext;
+			SetDbContext(dbContext);
 			init();
 		}
 
 		private void init()
 		{
-			var tt = typeof(T);
-			if (!tt.IsInterface)
-			{
-				SetDbSet<T>();
-			}
-
 			ListChanged += DbContextList_ListChanged;
 		}
 
@@ -50,23 +46,36 @@ namespace Syrilium.Common
 			return (DbContextList<T>)base.SetAddNew<TNew>();
 		}
 
+		public DbContextList<T> SetDbContext(DbContext dbContext)
+		{
+			DbContext = dbContext;
+			var tt = typeof(T);
+			if (!tt.IsInterface)
+			{
+				SetDbSet<T>();
+			}
+			return this;
+		}
+
 		public DbContextList<T> SetDbSet<TNew>()
 		{
-			DbSet = DbContext.Set(typeof(TNew));
+			DbSet = DbContext?.Set(typeof(TNew));
 			return this;
 		}
 
 		private void DbContextList_ListChanged(object sender, ListChangedEventArgs e)
 		{
+			if (!ReflectChangesToDbSet) return;
+
 			var changeInfo = (TSList<T>.ChangeInfo)sender;
 
 			if (changeInfo.ExtraInfo?.ToString() != "ByFilter")
 			{
 				foreach (var i in changeInfo.AddedItems)
-					DbSet.Add(i);
+					DbSet.Add(DbSetObjectNeeded?.Invoke(ListChangedType.ItemAdded, (T)i) ?? i);
 
 				foreach (var i in changeInfo.RemovedItems)
-					DbSet.Remove(i);
+					DbSet.Remove(DbSetObjectNeeded?.Invoke(ListChangedType.ItemDeleted, (T)i) ?? i);
 			}
 		}
 
