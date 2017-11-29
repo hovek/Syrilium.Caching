@@ -92,6 +92,6 @@ namespace Syrilium.CachingInterface
 		ICacheMethodConfiguration<T> ClearAt(TimeSpan? time);
 		ICacheMethodConfiguration<T> ClearAfter(TimeSpan? time);
 		ICacheMethodConfiguration<T> IdleReadClearTime(TimeSpan? time);
-		ICacheMethodConfiguration<T> ParamsForKey(params int[] paramIndexes);
+		ICacheMethodConfiguration<T> ParamsForKey(bool exclude, params int[] paramIndexes);
 	}
 }

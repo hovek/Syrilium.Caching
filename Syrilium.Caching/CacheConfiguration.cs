@@ -338,8 +338,21 @@ namespace Syrilium.Caching
 			return this;
 		}
 
-		public ICacheMethodConfiguration<T> ParamsForKey(params int[] paramIndexes)
+		public ICacheMethodConfiguration<T> ParamsForKey(bool exclude, params int[] paramIndexes)
 		{
+			if (exclude)
+			{
+				var includeParams = new List<int>();
+				var paramsCount = this.MethodInfo.GetParameters().Count();
+				for (int i = 0; i < paramsCount; i++)
+				{
+					if (paramIndexes.Contains(i))
+						continue;
+					includeParams.Add(i);
+				}
+				paramIndexes = includeParams.ToArray();
+			}
+
 			ParamsForKeyPropSet = true;
 			ParamsForKeyProp = paramIndexes;
 			return this;
