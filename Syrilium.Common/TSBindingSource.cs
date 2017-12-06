@@ -14,7 +14,10 @@ namespace Syrilium.Common
 
 		public override object AddNew()
 		{
-			prevCurrent = ((IBindingList)DataSource).AddNew();
+			if (DataSource is IBindingList)
+				prevCurrent = ((IBindingList)DataSource).AddNew();
+			else
+				prevCurrent = base.AddNew();
 			repositionToCurrent();
 			return prevCurrent;
 		}
