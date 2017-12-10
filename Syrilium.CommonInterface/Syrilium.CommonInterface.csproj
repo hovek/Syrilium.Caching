@@ -60,6 +60,7 @@
     <Compile Include="ISortable.cs" />
     <Compile Include="ITSList.cs" />
     <Compile Include="ObjectWrapper.cs" />
+    <Compile Include="Randomizer.cs" />
     <Compile Include="ReaderWriterLockWrapper.cs" />
     <Compile Include="Delegates.cs" />
     <Compile Include="EnumStringValue.cs" />
