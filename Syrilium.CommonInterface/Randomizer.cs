@@ -15,5 +15,13 @@ namespace Syrilium.CommonInterface
 			return new string(Enumerable.Repeat(chars, length)
 			  .Select(s => s[random.Next(s.Length)]).ToArray());
 		}
+
+		public static string GeneratePassword(int length)
+		{
+			Random random = new Random();
+			const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+			return new string(Enumerable.Repeat(chars, length)
+			  .Select(s => s[random.Next(s.Length)]).ToArray());
+		}
 	}
 }
