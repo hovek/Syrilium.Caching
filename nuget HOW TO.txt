@@ -1,2 +1,0 @@
-nuget pack Syrilium.Caching\Syrilium.Caching.csproj -IncludeReferencedProjects
-nuget push Syrilium.Caching.1.0.2.30077.nupkg d6359522-492c-4c24-a84e-17a705468d37 -Source https://www.nuget.org/api/v2/package
